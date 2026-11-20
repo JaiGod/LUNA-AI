@@ -22,8 +22,20 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
 
     const url = new URL(request.url);
+    if (!allowed.includes(origin) && request.method === 'POST') return new Response('Origin not allowed', { status: 403, headers: cors });
+
+    // Copilot (GitHub Models): GitHub sends no CORS headers, so the page calls it through here.
+    // Uses the caller's GitHub token (Authorization header), or a GITHUB_TOKEN secret if set.
+    if (request.method === 'POST' && url.pathname === '/github/chat/completions') {
+      const auth = request.headers.get('authorization') || (env.GITHUB_TOKEN ? `Bearer ${env.GITHUB_TOKEN}` : '');
+      if (!auth) return new Response('GitHub token required', { status: 401, headers: cors });
+      const upstream = await fetch('https://models.github.ai/inference/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: auth }, body: await request.text() });
+      const out = new Headers(upstream.headers);
+      for (const [k, v] of Object.entries(cors)) out.set(k, v);
+      return new Response(upstream.body, { status: upstream.status, headers: out });
+    }
+
     if (request.method !== 'POST' || url.pathname !== '/v1/messages') return new Response('Not found', { status: 404, headers: cors });
-    if (!allowed.includes(origin)) return new Response('Origin not allowed', { status: 403, headers: cors });
 
     let body;
     try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400, headers: cors }); }

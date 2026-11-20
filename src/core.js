@@ -11,6 +11,7 @@ export function createCore(canvas) {
   const status = {}; // id -> 'off' | 'on' | 'busy' | 'error'
   const pulses = []; // {sat, p, color}
   let mood = 'idle'; // idle | listening | thinking | speaking
+  let charge = 0, shown = 0, chargeLabel = ''; // super-brain charge: grows with every AI and server connection
 
   // Brain seen from the side (front = left): cerebrum, temporal lobe, cerebellum and brainstem.
   // Gyri are drawn as wavy contour lines; neurons sit along them and fire along the folds.
@@ -74,7 +75,8 @@ export function createCore(canvas) {
     g.clearRect(0, 0, W, H);
     const cx = W / 2, cy = H * 0.55, S = Math.min(W * 0.25, H * 0.34);
     const spin = Math.sin(t * 0.25) * 0.28;
-    const speed = mood === 'thinking' ? 3 : mood === 'speaking' ? 2 : mood === 'listening' ? 1.6 : 1;
+    shown += (charge - shown) * 0.04;
+    const speed = (mood === 'thinking' ? 3 : mood === 'speaking' ? 2 : mood === 'listening' ? 1.6 : 1) * (1 + shown * 0.8);
 
     // lunar horizon
     const hg = g.createLinearGradient(0, H * 0.8, 0, H);
@@ -84,8 +86,8 @@ export function createCore(canvas) {
     for (let i = 1; i < 6; i++) { g.beginPath(); g.ellipse(cx, H * 0.95, W * 0.12 * i, H * 0.025 * i, 0, Math.PI, 2 * Math.PI); g.stroke(); }
 
     // glow
-    const glow = g.createRadialGradient(cx, cy, S * 0.1, cx, cy, S * 1.6);
-    glow.addColorStop(0, `rgba(56,189,248,${0.22 + 0.06 * Math.sin(t * 2 * speed)})`); glow.addColorStop(1, 'rgba(56,189,248,0)');
+    const glow = g.createRadialGradient(cx, cy, S * 0.1, cx, cy, S * (1.6 + shown * 0.6));
+    glow.addColorStop(0, `rgba(56,189,248,${0.18 + shown * 0.3 + 0.06 * Math.sin(t * 2 * speed)})`); glow.addColorStop(0.5, `rgba(167,139,250,${shown * 0.12})`); glow.addColorStop(1, 'rgba(56,189,248,0)');
     g.fillStyle = glow; g.fillRect(0, 0, W, H);
 
     // rotating rings (one per AI system)
@@ -113,13 +115,13 @@ export function createCore(canvas) {
     for (const [i, j] of links) {
       const a = P[i], b = P[j];
       const fire = 0.5 + 0.5 * Math.sin(t * 3 * speed + a.n.f);
-      g.strokeStyle = `rgba(${a.n.hemi ? '125,211,252' : '196,181,253'},${0.12 + 0.35 * fire * (0.6 + 0.4 * (a.z + 1) / 2)})`;
+      g.strokeStyle = `rgba(${a.n.hemi ? '125,211,252' : '196,181,253'},${0.1 + shown * 0.12 + (0.3 + shown * 0.25) * fire * (0.6 + 0.4 * (a.z + 1) / 2)})`;
       g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
     }
     for (let i = 0; i < P.length; i++) {
       const p = P[i];
       const fire = 0.5 + 0.5 * Math.sin(t * 4 * speed + p.n.f * 3);
-      if (i % 4 && fire < 0.92) continue; // draw a quarter of the neurons, plus any that are firing
+      if (i % (shown > 0.6 ? 2 : 4) && fire < 0.92 - shown * 0.12) continue; // draw a quarter of the neurons, plus any that are firing
       const r = 0.7 + 1.3 * fire * ((p.z + 1.3) / 2.3);
       g.fillStyle = fire > 0.93 ? '#ffffff' : p.n.hemi ? 'rgba(186,230,253,.9)' : 'rgba(221,214,254,.9)';
       g.beginPath(); g.arc(p.x, p.y, r, 0, 6.283); g.fill();
@@ -131,6 +133,17 @@ export function createCore(canvas) {
       if (s.p >= 1) { sparks.splice(k, 1); continue; }
       const a = P[s.l[0]], b = P[s.l[1]];
       g.fillStyle = '#e0f2fe'; g.beginPath(); g.arc(a.x + (b.x - a.x) * s.p, a.y + (b.y - a.y) * s.p, 1.8, 0, 6.283); g.fill();
+    }
+
+    // charge ring: how much of LUNA-X's network is connected
+    if (shown > 0.01) {
+      const rr = S * 1.12;
+      g.lineWidth = 3; g.strokeStyle = 'rgba(147,164,200,.12)'; g.beginPath(); g.arc(cx, cy, rr, 0, 6.283); g.stroke();
+      const cg = g.createLinearGradient(cx - rr, cy, cx + rr, cy); cg.addColorStop(0, '#38bdf8'); cg.addColorStop(0.5, '#a78bfa'); cg.addColorStop(1, '#f472b6');
+      g.strokeStyle = cg; g.lineWidth = 3; g.shadowColor = '#a78bfa'; g.shadowBlur = 8 + shown * 14;
+      g.beginPath(); g.arc(cx, cy, rr, -Math.PI / 2, -Math.PI / 2 + 6.283 * shown); g.stroke(); g.shadowBlur = 0;
+      g.font = `700 ${W < 520 ? 9 : 10.5}px 'JetBrains Mono', monospace`; g.fillStyle = 'rgba(230,241,255,.85)'; g.textAlign = 'right';
+      g.fillText(`CHARGE ${Math.round(shown * 100)}%${chargeLabel ? ' · ' + chargeLabel : ''}`, W - 14, H - 14); // corner, clear of the satellites
     }
 
     // satellites + beams
@@ -169,6 +182,7 @@ export function createCore(canvas) {
     setSatellites,
     setStatus(id, st) { status[id] = st; },
     setMood(m) { mood = m; },
+    setCharge(v, label = '') { charge = Math.max(0, Math.min(1, v)); chargeLabel = label; },
     stop() { cancelAnimationFrame(raf); },
   };
 }

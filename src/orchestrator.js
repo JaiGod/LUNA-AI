@@ -13,6 +13,7 @@ export const PROVIDERS = {
   meta: { name: 'Meta Llama', org: 'Meta via OpenRouter', color: '#a78bfa', free: true, role: 'Crew conversation and interaction (free models)', kind: 'openai', base: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-4-maverick:free', keyUrl: 'https://openrouter.ai/keys' },
   groq: { name: 'Groq Llama', org: 'Groq', color: '#f55036', free: true, role: 'Fast free Llama for quick checks', kind: 'openai', base: 'https://api.groq.com/openai/v1', model: 'meta-llama/llama-4-scout-17b-16e-instruct', keyUrl: 'https://console.groq.com/keys' },
   chrome: { name: 'Gemini Nano', org: 'Chrome built-in, on device', color: '#34d399', free: true, role: 'Free offline chat, no key (Chrome only)', kind: 'chrome', nokey: true },
+  copilot: { name: 'Copilot (GitHub Models)', org: 'GitHub · Microsoft', color: '#7c8cff', free: true, role: 'GitHub Models: GPT and other models with a free GitHub token. GitHub blocks direct browser calls, so it runs through the LUNA proxy (worker/), set as the API base URL.', kind: 'openai', base: 'https://models.github.ai/inference', model: 'openai/gpt-4.1-mini', keyUrl: 'https://github.com/settings/personal-access-tokens' },
   webllm: { name: 'WebLLM', org: 'Llama on your GPU', color: '#fbbf24', free: true, role: 'Free offline chat, no key (downloads ~1 GB once)', kind: 'webllm', nokey: true, model: 'Llama-3.2-1B-Instruct-q4f16_1-MLC' },
 };
 
@@ -185,5 +186,5 @@ export function fuse(objects, results) {
 
 /* ---------- free chat fallback (no Claude) ---------- */
 export function freeChatOrder(settings) {
-  return ['gemini', 'meta', 'groq', 'openai', 'chrome', 'webllm'].filter((id) => isConnected(settings, id));
+  return ['gemini', 'meta', 'groq', 'openai', 'copilot', 'chrome', 'webllm'].filter((id) => isConnected(settings, id));
 }

@@ -136,6 +136,39 @@ export async function runTurn({ client, model, effort, history, execute, cb, sig
   throw new Error('LUNA used too many tool steps for one answer.');
 }
 
+/* ---------- direct chat with Claude (no LUNA persona, no habitat tools) ---------- */
+export async function directClaude({ client, model, effort = 'medium', history, cb, signal, web = true, code = true, session = {} }) {
+  const fb = MODELS[model]?.fallbacks;
+  const system = `You are Claude, made by Anthropic, chatting directly with the user inside the LUNA-X app (a NASA HUNCH student project). Today is ${new Date().toDateString()}. Use web search for current information and cite sources, run code when it helps, and use Markdown.`;
+  for (let round = 0; round < 8; round++) {
+    const params = {
+      model, max_tokens: 64000, system,
+      cache_control: { type: 'ephemeral' },
+      thinking: { type: 'adaptive', display: 'summarized' },
+      output_config: { effort },
+      tools: [...(web ? SERVER_TOOLS.web : []), ...(code ? SERVER_TOOLS.code : [])],
+      ...(session.container ? { container: session.container } : {}),
+      messages: history,
+      ...(fb ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {}),
+    };
+    if (!params.tools.length) delete params.tools;
+    const stream = fb ? client.beta.messages.stream(params, { signal }) : client.messages.stream(params, { signal });
+    stream.on('streamEvent', (ev) => { if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') cb.text(ev.delta.text); });
+    const msg = await stream.finalMessage();
+    claudeUsage('claude', msg.usage, MODELS[msg.model] ? msg.model : model);
+    if (msg.stop_reason === 'refusal') return { refused: true };
+    if (msg.container?.id) session.container = msg.container.id;
+    for (const b of msg.content) {
+      if (b.type === 'server_tool_use') cb.server?.(b.name, SERVER_LABEL[b.name] || b.name, b.input);
+      if (b.type === 'text' && b.citations?.length) cb.sources?.(b.citations.filter((c) => c.url).map((c) => ({ url: c.url, title: c.title || c.url })));
+      if (b.type === 'web_search_tool_result' && Array.isArray(b.content)) cb.found?.(b.content.filter((r) => r.url).map((r) => ({ url: r.url, title: r.title || r.url })));
+    }
+    history.push({ role: 'assistant', content: echoable(msg.content) });
+    if (msg.stop_reason !== 'pause_turn') return { message: msg };
+  }
+  return {};
+}
+
 /* ---------- single-shot structured calls (vision, mood) ---------- */
 export async function structured({ client, model, effort = 'low', system, content, schema, signal }) {
   const fb = MODELS[model]?.fallbacks;

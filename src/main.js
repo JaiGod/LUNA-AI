@@ -3,8 +3,10 @@ import {
   LIMITS, LIGHTING, SKILLS, DRILLS, ATTACKS,
 } from './sim.js';
 import { makeExecutor } from './tools.js';
-import { makeClient, runTurn, structured, offlineReply, crisisCheck, friendlyError, MODELS, SYSTEM, CLAUDE_TAKEOVER } from './brain.js';
+import { makeClient, runTurn, directClaude, structured, offlineReply, crisisCheck, friendlyError, MODELS, SYSTEM, CLAUDE_TAKEOVER } from './brain.js';
 import { md } from './md.js';
+import { createNebula } from './nebula.js';
+import { createChatView } from './chatview.js';
 import { onUsage, getUsage, resetUsage, fmtTokens, fmtUSD, DASHBOARDS, claudeUsage } from './usage.js';
 import { ws, saveWs, onWorkspace, AGENTS, remember, forget, addProject, activeProject, wsContext, wsSignature, routeTask } from './workspace.js';
 import { createVision, loadDetector, detectLive, grabFrame, deepScan, faceCheckin, voiceMood, inspectPanel, formCheck, pitchOf } from './vision.js';
@@ -21,28 +23,24 @@ const vision = createVision();
 let settings = loadSettings();
 let history = [];          // Claude conversation, append-only
 let pendingNotes = [];
+let cv = null;            // chat view (sidebar + separate chats per AI)
 const claudeSession = {};   // code-execution container reused across turns
 const freeHistory = [];    // conversation memory for the free AIs
 let rollbackTo = null;
 let lastWsSig = '';      // workspace context is re-sent to Claude only when it changes     // events LUNA should know about, sent with the next user message
 let busy = false, abortCtl = null;
 
-/* ---------- starfield ---------- */
-(() => {
-  const c = $('#stars'), g = c.getContext('2d');
-  const draw = () => {
-    c.width = innerWidth; c.height = innerHeight; g.fillStyle = '#fff';
-    for (let i = 0; i < 180; i++) { g.globalAlpha = Math.random() * 0.7 + 0.1; g.beginPath(); g.arc(Math.random() * c.width, Math.random() * c.height, Math.random() * 1.1, 0, 6.3); g.fill(); }
-  };
-  draw(); addEventListener('resize', draw);
-})();
+/* ---------- nebula sky (the LUNA star-projector look) ---------- */
+let skyTheme = 'projector';
+try { skyTheme = localStorage.getItem('luna-sky') || 'projector'; } catch { /* ignore */ }
+const nebula = createNebula($('#stars'), skyTheme);
 
 /* ---------- cognitive core ---------- */
 const core = createCore($('#core'));
 const SATS = [
   { id: 'claude', label: 'Claude', ai: true, color: '#e8956f' }, { id: 'openai', label: 'OpenAI', ai: true, color: '#10a37f' },
   { id: 'gemini', label: 'Gemini', ai: true, color: '#60a5fa' }, { id: 'meta', label: 'Meta AI', ai: true, color: '#a78bfa' },
-  { id: 'groq', label: 'Groq', ai: true, color: '#f97362' }, { id: 'chrome', label: 'Gemini Nano', ai: true, color: '#34d399' }, { id: 'webllm', label: 'WebLLM', ai: true, color: '#fbbf24' },
+  { id: 'groq', label: 'Groq', ai: true, color: '#f97362' }, { id: 'chrome', label: 'Gemini Nano', ai: true, color: '#34d399' }, { id: 'webllm', label: 'WebLLM', ai: true, color: '#fbbf24' }, { id: 'copilot', label: 'Copilot', ai: true, color: '#7c8cff' },
   { id: 'selene', label: 'SELENE', color: '#f472b6' }, { id: 'habitat', label: 'Habitat systems', color: '#38bdf8' }, { id: 'sensors', label: 'Env. sensors', color: '#38bdf8' },
   { id: 'medical', label: 'Medical', color: '#f472b6' }, { id: 'eva', label: 'EVA suits', color: '#94a3b8' }, { id: 'rovers', label: 'Rovers', color: '#94a3b8' },
   { id: 'mission', label: 'Mission control', color: '#93c5fd' }, { id: 'lash', label: 'LASH-Net', color: '#fb923c' },
@@ -54,6 +52,11 @@ function refreshCoreStatus() {
   for (const id of Object.keys(PROVIDERS)) core.setStatus(id, isConnected(settings, id) && !(id === 'claude' && control === 'luna') ? 'on' : 'off');
   for (const id of ['selene', 'habitat', 'sensors', 'medical', 'eva', 'rovers', 'lash']) core.setStatus(id, 'on');
   core.setStatus('mission', sim.sensors.earth_link === 'up' ? 'on' : 'error');
+  // super-brain charge: every connected AI and server connection adds power
+  const ais = Object.keys(PROVIDERS).filter((id) => isConnected(settings, id) && !(id === 'claude' && control === 'luna')).length;
+  const cOn = isConnected(settings, 'claude') && control !== 'luna';
+  const servers = [cOn && settings.claude.web !== false, cOn && settings.claude.web !== false, cOn && settings.claude.code !== false, !!settings.claude.proxy, sim.sensors.earth_link === 'up', true /* SELENE link */].filter(Boolean).length;
+  core.setCharge((ais + servers) / (Object.keys(PROVIDERS).length + 6), `${ais} AI · ${servers} servers`);
 }
 function setMood(m, label) { core.setMood(m); $('#coreState').textContent = `LUNA-X · ${label || m}`; }
 
@@ -138,6 +141,7 @@ function rebuildClient() {
   $('#pFree').lastChild.textContent = `Other AIs: ${free.length}`;
   refreshCoreStatus();
   renderBadges();
+  cv?.refresh();
 }
 // Connected AIs appear in the header; ✓ once a link test has passed this session
 const verified = new Set();
@@ -162,6 +166,7 @@ const AI_ICON = {
   groq: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 1.5 4 13.5h6.5L9.5 22.5 20 9.5h-6.5Z"/></svg>',
   chrome: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5v3M15 2.5v3M9 18.5v3M15 18.5v3M2.5 9h3M2.5 15h3M18.5 9h3M18.5 15h3"/></svg>',
   webllm: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M12 2.5 21 7.5v9L12 21.5 3 16.5v-9Z"/><path d="M3 7.5 12 12.5 21 7.5M12 12.5v9"/></svg>',
+  copilot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13c0-4.4 3.6-8 8-8s8 3.6 8 8v3.5c0 1.4-1.1 2.5-2.5 2.5h-11C5.1 19 4 17.9 4 16.5Z"/><circle cx="9" cy="13.5" r="2"/><circle cx="15" cy="13.5" r="2"/><path d="M12 5V2.5"/></svg>',
 };
 function setVia(el, id, label) {
   const em = el.querySelector('.who em'), c = PROVIDERS[id]?.color || 'var(--dim)';
@@ -389,6 +394,13 @@ $('#voiceRate').oninput = (e) => { voicePrefs.rate = +e.target.value; saveVoice(
 $('#voiceTest').onclick = () => speak('Hello, I am LUNA-X, the habitat AI. SELENE and I are watching over the crew.', true);
 
 async function send(textIn) {
+  if (cv && cv.active() !== 'luna' && textIn == null) {
+    const files = attachments.splice(0); renderAttachments();
+    const t = $('#input').value.trim() || (files.length ? 'Please look at the attached file' + (files.length > 1 ? 's' : '') + '.' : '');
+    if (!t) { attachments.unshift(...files); renderAttachments(); return; }
+    $('#input').value = '';
+    return cv.directSend(t, files);
+  }
   const files = textIn == null ? attachments.splice(0) : [];
   renderAttachments();
   const text = (textIn ?? $('#input').value).trim() || (files.length ? 'Please look at the attached file' + (files.length > 1 ? 's' : '') + '.' : '');
@@ -1081,7 +1093,7 @@ $('#provs').addEventListener('change', (e) => {
   if (f !== 'key' && f !== 'proxy') renderProviders(); // keep the key test result visible
 });
 // Live feedback while a key is typed or pasted: format check and connection status, no re-render (keeps focus)
-const KEY_SHAPE = { claude: [/^sk-ant-/, 'Claude keys start with sk-ant-'], gemini: [/^AIza/, 'Gemini keys start with AIza'], meta: [/^sk-or-/, 'OpenRouter keys start with sk-or-'], groq: [/^gsk_/, 'Groq keys start with gsk_'], openai: [/^sk-/, 'OpenAI keys start with sk-'] };
+const KEY_SHAPE = { claude: [/^sk-ant-/, 'Claude keys start with sk-ant-'], gemini: [/^AIza/, 'Gemini keys start with AIza'], meta: [/^sk-or-/, 'OpenRouter keys start with sk-or-'], groq: [/^gsk_/, 'Groq keys start with gsk_'], openai: [/^sk-/, 'OpenAI keys start with sk-'], copilot: [/^(github_pat_|ghp_|gho_)/, 'GitHub tokens start with github_pat_ or ghp_'] };
 $('#provs').addEventListener('input', (e) => {
   const card = e.target.closest('[data-p]'); const f = e.target.dataset.f;
   if (!card || (f !== 'key' && f !== 'proxy')) return;
@@ -1114,7 +1126,7 @@ $('#provs').addEventListener('click', async (e) => {
       return m.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
     });
     out.textContent = '✓ Connected: ' + r + (settings[id].remember || PROVIDERS[id].nokey ? '' : ' (tick Remember to keep it after a refresh)'); out.style.color = 'var(--ok)'; collab(id, 'Link test passed'); announceAI(id);
-  } catch (err) { out.textContent = '✗ ' + (id === 'claude' ? friendlyError(err) : err.message); out.style.color = 'var(--red)'; collab(id, 'Link test failed', 'error'); }
+  } catch (err) { out.textContent = '✗ ' + (id === 'claude' ? friendlyError(err) : providerError(id, err)); out.style.color = 'var(--red)'; collab(id, 'Link test failed', 'error'); }
   refreshCoreStatus();
 });
 $('#btnConnect').onclick = () => { $('[data-t=network]').click(); $('#t-network').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
@@ -1195,4 +1207,12 @@ setInterval(() => { if (speedV) tick(sim, speedV); }, 1000);
 rebuildClient();
 renderTraining(); renderLash(); renderCheckins(); tick(sim, 0);
 greet();
+function providerError(id, err) {
+  const m = String(err?.message || err);
+  if (id === 'copilot' && /Failed to fetch|NetworkError|CORS/i.test(m)) return 'GitHub blocks direct browser calls to GitHub Models. Deploy the LUNA proxy (worker/) and set the Copilot API base URL to https://<your-worker>/github.';
+  if (/Failed to fetch/i.test(m)) return `Could not reach ${PROVIDERS[id].name} (network or blocked by the browser).`;
+  return m.slice(0, 240);
+}
+cv = createChatView({ $, esc, PROVIDERS, AI_ICON, isConnected, settings, aiLabel, MODELS, speak, finishBody, crisisCheck, claudeBlock, callProvider, friendlyError, providerError, setMood, flash, send, saveSettings, rebuildClient, nebula,
+  directClaude: (o) => directClaude({ client, model: settings.claude.model, web: settings.claude.web !== false, code: settings.claude.code !== false, ...o }) });
 setMood('idle');
