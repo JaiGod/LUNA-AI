@@ -3,7 +3,7 @@ import {
   LIMITS, LIGHTING, SKILLS, DRILLS, ATTACKS,
 } from './sim.js';
 import { makeExecutor } from './tools.js';
-import { makeClient, runTurn, structured, offlineReply, crisisCheck, friendlyError, MODELS } from './brain.js';
+import { makeClient, runTurn, structured, offlineReply, crisisCheck, friendlyError, MODELS, SYSTEM, CLAUDE_TAKEOVER } from './brain.js';
 import { createVision, loadDetector, detectLive, grabFrame, deepScan, faceCheckin, voiceMood, inspectPanel, formCheck, pitchOf } from './vision.js';
 import { PROVIDERS, loadSettings, saveSettings, isConnected, testProvider, callProvider, verifyDetections, verifiersOnline, freeChatOrder, onCollab, collab, chromeAvailable } from './orchestrator.js';
 import { createCore } from './core.js';
@@ -44,7 +44,7 @@ core.setSatellites(SATS.map((s, i) => ({ ...s, angle: (i / SATS.length) * Math.P
 const TOOL_SAT = { ask_selene: 'selene', get_habitat_status: 'habitat', adjust_habitat: 'habitat', get_forecast: 'sensors', eva_readiness: 'eva', escalate_to_human: 'medical', network_defense: 'lash', run_drill: 'mission', get_vision_detections: 'selene', schedule_event: 'mission', log_entry: 'selene', make_offer: 'selene', play_media: 'habitat', recall_learning: 'mission' };
 function flash(id, ms = 1600) { core.setStatus(id, 'busy'); setTimeout(() => refreshCoreStatus(), ms); }
 function refreshCoreStatus() {
-  for (const id of Object.keys(PROVIDERS)) core.setStatus(id, isConnected(settings, id) ? 'on' : 'off');
+  for (const id of Object.keys(PROVIDERS)) core.setStatus(id, isConnected(settings, id) && !(id === 'claude' && control === 'luna') ? 'on' : 'off');
   for (const id of ['selene', 'habitat', 'sensors', 'medical', 'eva', 'rovers', 'lash']) core.setStatus(id, 'on');
   core.setStatus('mission', sim.sensors.earth_link === 'up' ? 'on' : 'error');
 }
@@ -111,19 +111,102 @@ const execute = makeExecutor(sim, ui, vision);
 
 /* ---------- AI access ---------- */
 let client = null;
+// Who is in control: 'team' (LUNA-X with Claude as its brain), 'claude' (Claude takes over), 'luna' (LUNA solo, Claude off)
+let control = 'team';
+try { control = localStorage.getItem('luna-control-v1') || 'team'; } catch { /* ignore */ }
+if (!['team', 'claude', 'luna'].includes(control)) control = 'team';
+const claudeOn = () => !!client && control !== 'luna';
 function rebuildClient() {
   const c = settings.claude;
   client = isConnected(settings, 'claude') ? makeClient({ apiKey: c.key, proxyUrl: c.proxy }) : null;
   const free = Object.keys(PROVIDERS).filter((id) => id !== 'claude' && isConnected(settings, id));
   $('#pClaude').className = 'pill ' + (client ? 'on' : '');
-  $('#pClaude').lastChild.textContent = client ? `Claude: ${MODELS[c.model]?.label.split(' (')[0] || c.model}` : 'Claude: off';
+  $('#pClaude').lastChild.textContent = client && control === 'luna' ? 'Claude: standby' : client ? `Claude: ${(MODELS[c.model]?.label.split(' (')[0] || c.model).replace(/^Claude /, '')}` : 'Claude: off';
   $('#pFree').className = 'pill ' + (free.length ? 'on' : '');
   $('#pFree').lastChild.textContent = `Other AIs: ${free.length}`;
   refreshCoreStatus();
+  renderBadges();
 }
+// Connected AIs appear in the header; ✓ once a link test has passed this session
+const verified = new Set();
+function aiLabel(id) { return id === 'claude' ? (MODELS[settings.claude.model]?.label.split(' (')[0] || 'Claude') : PROVIDERS[id].name; }
+function renderBadges() {
+  const ids = Object.keys(PROVIDERS).filter((id) => isConnected(settings, id));
+  // LUNA logo + a linked icon for every connected AI (dual link, triple link…)
+  const tags = ['', 'LINKED', 'DUAL LINK', 'TRIPLE LINK', 'QUAD LINK'];
+  const standby = (id) => id === 'claude' && control === 'luna';
+  $('#linkIcons').innerHTML = ids.map((id) => `<span class="lk ${verified.has(id) && !standby(id) ? '' : 'untested'}" style="--c:${PROVIDERS[id].color}" title="LUNA-X ⟷ ${esc(aiLabel(id))}${verified.has(id) ? ' (link tested ✓)' : ' (not tested yet)'}"><b class="wire"></b><span class="aiico">${AI_ICON[id] || ''}</span></span>`).join('')
+    + (control === 'claude' && client ? '<span class="lktag" style="color:#d97757;border-color:#d97757">CLAUDE IN CONTROL</span>'
+      : control === 'luna' ? '<span class="lktag">LUNA SOLO</span>'
+      : ids.length ? `<span class="lktag">LUNA × ${ids.length > 4 ? ids.length + '-AI LINK' : tags[ids.length]}</span>` : '');
+  $('#aiBadges').innerHTML = ids.map((id) => `<span class="aib ${verified.has(id) ? '' : 'untested'}" style="--c:${PROVIDERS[id].color}" data-ai="${id}" title="${esc(PROVIDERS[id].role)}${verified.has(id) ? ' · link tested ✓' : ' · not tested yet (AI Network → Test link)'}"><i></i>${esc(aiLabel(id))}${verified.has(id) ? ' ✓' : ''}</span>`).join('');
+}
+// Simple original glyphs in each provider's colour (not official logos)
+const AI_ICON = {
+  claude: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">' + Array.from({ length: 8 }, (_, i) => { const a = (i * Math.PI) / 4; return `<line x1="${(12 + 3 * Math.cos(a)).toFixed(1)}" y1="${(12 + 3 * Math.sin(a)).toFixed(1)}" x2="${(12 + 10 * Math.cos(a)).toFixed(1)}" y2="${(12 + 10 * Math.sin(a)).toFixed(1)}"/>`; }).join('') + '</svg>',
+  gemini: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5C12.6 7.4 16.6 11.4 22.5 12 16.6 12.6 12.6 16.6 12 22.5 11.4 16.6 7.4 12.6 1.5 12 7.4 11.4 11.4 7.4 12 1.5Z"/></svg>',
+  openai: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M12 2.5 20.2 7.2v9.6L12 21.5 3.8 16.8V7.2Z"/><circle cx="12" cy="12" r="3"/></svg>',
+  meta: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 12c-2.2-3.4-4-5-6-5-2.3 0-3.5 2.5-3.5 5s1.2 5 3.5 5c2 0 3.8-1.6 6-5Zm0 0c2.2-3.4 4-5 6-5 2.3 0 3.5 2.5 3.5 5s-1.2 5-3.5 5c-2 0-3.8-1.6-6-5Z"/></svg>',
+  groq: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 1.5 4 13.5h6.5L9.5 22.5 20 9.5h-6.5Z"/></svg>',
+  chrome: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5v3M15 2.5v3M9 18.5v3M15 18.5v3M2.5 9h3M2.5 15h3M18.5 9h3M18.5 15h3"/></svg>',
+  webllm: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M12 2.5 21 7.5v9L12 21.5 3 16.5v-9Z"/><path d="M3 7.5 12 12.5 21 7.5M12 12.5v9"/></svg>',
+};
+function setVia(el, id, label) {
+  const em = el.querySelector('.who em'), c = PROVIDERS[id]?.color || 'var(--dim)';
+  em.innerHTML = `<span class="ico" style="color:${c}">${AI_ICON[id] || ''}</span>${esc(label)}`; em.style.color = c;
+}
+const JOIN_LINES = {
+  claude: 'is connected. I am now LUNA-X’s reasoning brain: conversation, habitat tools, safety review and SELENE deep scans.',
+  gemini: 'is connected. I will double-check SELENE Vision detections and chat when Claude is offline.',
+  openai: 'is connected. I will add scientific and engineering analysis to SELENE Vision detections.',
+  meta: 'is connected. I will handle crew conversation for free and cross-check detections.',
+  groq: 'is connected. Fast free Llama is ready for quick checks and conversation.',
+  chrome: 'is connected, running on this device with no key. I can chat even without internet.',
+  webllm: 'is connected, running on your GPU with no key.',
+};
+function announceAI(id) {
+  if (verified.has(id)) return;
+  verified.add(id); renderBadges();
+  const text = `${aiLabel(id)} ${JOIN_LINES[id] || 'is connected.'}`;
+  const el = addMsg('a', text, '');
+  el.classList.add('join'); el.style.setProperty('--c', PROVIDERS[id].color);
+  setVia(el, id, `${PROVIDERS[id].name} joined LUNA-X`);
+  flash(id, 2500); speak(text);
+}
+$('#aiBadges').onclick = () => $('#btnConnect').click();
+function syncControlUI() {
+  document.querySelectorAll('#control button').forEach((b) => { const on = b.dataset.c === control; b.classList.toggle('act', on); b.setAttribute('aria-checked', String(on)); });
+}
+function setControl(next) {
+  if (next === control) return;
+  if (next === 'claude' && !client) {
+    const el = addMsg('a', 'Claude is not connected yet, so LUNA-X stays in control. Add a Claude key in Connect AI, then Claude can take over.', 'system');
+    speak(el.querySelector('.body').textContent); syncControlUI(); return;
+  }
+  control = next; try { localStorage.setItem('luna-control-v1', control); } catch { /* ignore */ }
+  history = []; pendingNotes = []; // a new controller starts a fresh conversation
+  syncControlUI(); rebuildClient();
+  const free = Object.keys(PROVIDERS).filter((id) => id !== 'claude' && isConnected(settings, id)).map(aiLabel);
+  let el, text;
+  if (control === 'claude') {
+    text = 'Claude here. LUNA-X is switched off, so I have taken over the habitat. I still have all of LUNA’s tools and SELENE’s health data, and the same safety rules.';
+    el = addMsg('a', text, ''); el.querySelector('.nm').textContent = 'CLAUDE'; el.querySelector('.nm').style.color = PROVIDERS.claude.color;
+    setVia(el, 'claude', 'took over'); flash('claude', 2500);
+  } else if (control === 'luna') {
+    text = `LUNA-X here. Claude is switched off, so I have taken over with my onboard brain${free.length ? ' and ' + free.join(', ') : ''}. Habitat commands, drills, SELENE readings and network defence all still work.`;
+    el = addMsg('a', text, 'LUNA solo');
+  } else {
+    text = client ? 'LUNA-X and Claude are linked again. Claude is my reasoning brain, and I run the habitat.' : 'LUNA-X is in control.';
+    el = addMsg('a', text, 'linked'); if (client) setVia(el, 'claude', 'LUNA-X + ' + aiLabel('claude')); flash('claude', 2500);
+  }
+  el.classList.add('join'); el.style.setProperty('--c', control === 'luna' ? 'var(--cyan)' : PROVIDERS.claude.color);
+  speak(text);
+}
+$('#control').onclick = (e) => { const c = e.target.dataset?.c; if (c) setControl(c); };
+syncControlUI();
 const ai = {
   structured: (o) => {
-    if (!client) throw new Error('Connect Claude in AI Network to use SELENE deep scans and check-ins.');
+    if (!claudeOn()) throw new Error(client ? 'Claude is switched off (LUNA solo). Switch “In control” back to use SELENE deep scans and check-ins.' : 'Connect Claude in AI Network to use SELENE deep scans and check-ins.');
     flash('claude', 4000);
     return structured({ client, model: settings.claude.model, ...o });
   },
@@ -140,9 +223,11 @@ $('#quick').onclick = (e) => { if (e.target.tagName === 'BUTTON') send(e.target.
 function addMsg(role, text, extra = '') {
   const el = document.createElement('div');
   el.className = 'm ' + role;
-  if (role === 'a') el.innerHTML = `<div class="who">LUNA-X <em>${esc(extra)}</em></div><div class="tools"></div><div class="body"></div>`;
+  if (role === 'a') el.innerHTML = `<div class="who"><span class="nm">LUNA-X</span> <em>${esc(extra)}</em><button class="say" title="Read this reply out loud" aria-label="Read out loud">🔊</button></div><div class="tools"></div><div class="body"></div>`;
   else el.innerHTML = `<div class="body"></div>`;
   el.querySelector('.body').textContent = text;
+  const say = el.querySelector('.say');
+  if (say) say.onclick = () => speak(el.querySelector('.body').textContent, true);
   $('#msgs').append(el); $('#msgs').scrollTop = 1e9;
   return el;
 }
@@ -172,16 +257,77 @@ function guessSkill(t) {
   if (/earth|link|call|message|signal/.test(t)) return 'comm';
   return 'hab';
 }
-function speak(text) {
-  if (!$('#speak').checked || !('speechSynthesis' in window)) return;
-  speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text.replace(/[*#_`]/g, '').slice(0, 900));
-  u.rate = 1.02; u.pitch = 1.05;
-  const v = speechSynthesis.getVoices().find((x) => /female|samantha|zira|aria|jenny|google uk english female/i.test(x.name));
-  if (v) u.voice = v;
-  u.onstart = () => setMood('speaking'); u.onend = () => setMood('idle');
-  speechSynthesis.speak(u);
+// ---- LUNA's voice (browser speech synthesis: free, on device, no key) ----
+const VOICE_KEY = 'luna-voice-v1';
+let voicePrefs = { on: true, voice: '', rate: 1 };
+try { voicePrefs = { ...voicePrefs, ...JSON.parse(localStorage.getItem(VOICE_KEY) || '{}') }; } catch { /* storage blocked */ }
+const canSpeak = 'speechSynthesis' in window;
+function saveVoice() { try { localStorage.setItem(VOICE_KEY, JSON.stringify(voicePrefs)); } catch { /* ignore */ } }
+function pickVoice() {
+  const vs = canSpeak ? speechSynthesis.getVoices() : [];
+  return vs.find((x) => x.name === voicePrefs.voice)
+    || vs.find((x) => /^en/i.test(x.lang) && /female|samantha|zira|aria|jenny|libby|sonia|google uk english female|google us english/i.test(x.name))
+    || vs.find((x) => /^en/i.test(x.lang));
 }
+function fillVoices() {
+  if (!canSpeak) return;
+  const vs = speechSynthesis.getVoices().filter((v) => /^en/i.test(v.lang));
+  $('#voicePick').innerHTML = '<option value="">Auto (LUNA)</option>' + vs.map((v) => `<option value="${esc(v.name)}">${esc(v.name.replace(/^Microsoft |^Google /, ''))} · ${esc(v.lang)}</option>`).join('');
+  $('#voicePick').value = voicePrefs.voice;
+}
+function syncVoiceUI() {
+  $('#speak').checked = voicePrefs.on;
+  $('#voiceRate').value = voicePrefs.rate;
+  const b = $('#voiceBtn');
+  b.textContent = voicePrefs.on ? '🔊' : '🔇';
+  b.classList.toggle('off', !voicePrefs.on);
+  b.setAttribute('aria-pressed', String(voicePrefs.on));
+  b.setAttribute('aria-label', voicePrefs.on ? 'Voice on' : 'Voice off');
+}
+function stopSpeaking() { if (canSpeak) speechSynthesis.cancel(); $('#voiceBtn').classList.remove('talking'); }
+// force = speak even when auto-speak is off (replay buttons, Test voice)
+function speak(text, force = false) {
+  if (!canSpeak || (!voicePrefs.on && !force)) return;
+  speechSynthesis.cancel();
+  const clean = String(text || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/https?:\/\/\S+/g, 'link')
+    .replace(/[*#_`>|~]/g, '')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '')
+    .replace(/ppCO₂|CO₂/g, 'C O 2').replace(/O₂/g, 'oxygen').replace(/°C/g, ' degrees').replace(/mSv/g, 'millisieverts')
+    .replace(/\s+/g, ' ').trim();
+  if (!clean) return;
+  // Chrome stops long utterances after ~15 s, so speak sentence-sized chunks
+  const chunks = [];
+  for (const s of clean.match(/[^.!?]+[.!?]*\s*/g) || [clean]) {
+    if (chunks.length && (chunks.at(-1) + s).length < 220) chunks[chunks.length - 1] += s; else chunks.push(s);
+  }
+  const v = pickVoice();
+  chunks.slice(0, 30).forEach((c, i, arr) => {
+    const u = new SpeechSynthesisUtterance(c.trim());
+    if (v) { u.voice = v; u.lang = v.lang; }
+    u.rate = voicePrefs.rate; u.pitch = 1.05;
+    if (i === 0) u.onstart = () => { setMood('speaking'); $('#voiceBtn').classList.add('talking'); };
+    if (i === arr.length - 1) u.onend = u.onerror = () => { $('#voiceBtn').classList.remove('talking'); if (!busy) setMood('idle'); };
+    speechSynthesis.speak(u);
+  });
+}
+if (canSpeak) {
+  fillVoices();
+  speechSynthesis.addEventListener?.('voiceschanged', fillVoices);
+} else {
+  $('#voiceBtn').disabled = true; $('#voiceBtn').title = 'This browser cannot speak (no speech synthesis)';
+}
+syncVoiceUI();
+$('#voiceBtn').onclick = () => {
+  if (canSpeak && speechSynthesis.speaking) { stopSpeaking(); return; }
+  voicePrefs.on = !voicePrefs.on; saveVoice(); syncVoiceUI();
+  if (voicePrefs.on) speak('Voice on. I will read my replies out loud.');
+};
+$('#speak').onchange = (e) => { voicePrefs.on = e.target.checked; saveVoice(); syncVoiceUI(); if (!voicePrefs.on) stopSpeaking(); };
+$('#voicePick').onchange = (e) => { voicePrefs.voice = e.target.value; saveVoice(); };
+$('#voiceRate').oninput = (e) => { voicePrefs.rate = +e.target.value; saveVoice(); };
+$('#voiceTest').onclick = () => speak('Hello, I am LUNA-X, the habitat AI. SELENE and I are watching over the crew.', true);
 
 async function send(textIn) {
   const text = (textIn ?? $('#input').value).trim();
@@ -198,10 +344,12 @@ async function send(textIn) {
     pendingNotes.push(`LUNA's offline safety check already escalated this message to humans: ${r.content}`);
   }
 
-  const el = addMsg('a', '', client ? settings.claude.model : 'offline');
+  const el = addMsg('a', '', 'offline');
+  if (claudeOn()) setVia(el, 'claude', control === 'claude' ? aiLabel('claude') + ' in control' : 'via ' + aiLabel('claude'));
+  if (claudeOn() && control === 'claude') { el.querySelector('.nm').textContent = 'CLAUDE'; el.querySelector('.nm').style.color = PROVIDERS.claude.color; }
   const body = el.querySelector('.body'), tools = el.querySelector('.tools');
   try {
-    if (client) {
+    if (claudeOn()) {
       setMood('thinking');
       const notes = pendingNotes.length ? `[Habitat events since my last message: ${pendingNotes.join(' ')}]\n` : '';
       pendingNotes = [];
@@ -210,7 +358,7 @@ async function send(textIn) {
       abortCtl = new AbortController();
       let think = null;
       const res = await runTurn({
-        client, model: settings.claude.model, effort: settings.claude.effort, history, execute, signal: abortCtl.signal,
+        client, model: settings.claude.model, effort: settings.claude.effort, history, execute, signal: abortCtl.signal, system: control === 'claude' ? CLAUDE_TAKEOVER : SYSTEM,
         cb: {
           text: (d) => { if (think) { think.remove(); think = null; } setMood('speaking', 'answering'); body.textContent += d; $('#msgs').scrollTop = 1e9; },
           thinking: (on) => { if (on && !think) { think = document.createElement('div'); think.className = 'thinking'; think.textContent = 'LUNA-X is thinking…'; el.insertBefore(think, body); setMood('thinking'); } },
@@ -245,10 +393,10 @@ async function send(textIn) {
     if (err?.name === 'AbortError') body.textContent += ' [stopped]';
     else {
       body.textContent = friendlyError(err);
-      if (client && !body.textContent.startsWith('Claude rejected')) {
+      if (claudeOn() && !body.textContent.startsWith('Claude rejected')) {
         // link down: answer from the offline brain so the crew is never left without LUNA
         const fallback = await offlineReply(text, execute);
-        if (!fallback.startsWith("I'm in offline mode")) addMsg('a', fallback, 'offline fallback');
+        if (!fallback.startsWith("I'm in offline mode")) addMsg('a', fallback, 'LUNA took over: Claude unreachable');
       }
       // the failed user turn is removed so the next request starts clean
       while (history.length && history.at(-1).role === 'user' && typeof history.at(-1).content === 'string') history.pop();
@@ -266,7 +414,7 @@ async function freeChat(order, text, who, el) {
       collab(id, 'Answering crew conversation…', 'working');
       const out = await callProvider(settings, id, { system, text: `${who.name}: ${text}`, onProgress: (p) => { el.querySelector('.who em').textContent = `${PROVIDERS[id].name}: ${p}`; } });
       collab(id, 'Crew conversation answered');
-      el.querySelector('.who em').textContent = PROVIDERS[id].name + (PROVIDERS[id].free ? ' (free)' : '');
+      setVia(el, id, 'via ' + PROVIDERS[id].name + (PROVIDERS[id].free ? ' (free)' : ''));
       return out.trim();
     } catch (e) { collab(id, `Failed: ${e.message}`, 'error'); }
   }
@@ -278,8 +426,8 @@ $('#input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shi
 $('#newChat').onclick = () => { abortCtl?.abort(); history = []; pendingNotes = []; $('#msgs').innerHTML = ''; greet(); };
 $('#asCrew').innerHTML = sim.crew.map((c) => `<option value="${c.id}">${esc(c.name)} (${esc(c.role)})</option>`).join('');
 function greet() {
-  addMsg('a', client
-    ? `LUNA-X online, connected to Claude and SELENE. Mission day ${sim.missionDay}, habitat time ${clock(sim)}. Ask me anything, or try a quick prompt below.`
+  addMsg('a', claudeOn()
+    ? `LUNA-X online, connected to ${Object.keys(PROVIDERS).filter((id) => isConnected(settings, id)).map(aiLabel).join(', ')} and SELENE. Mission day ${sim.missionDay}, habitat time ${clock(sim)}. Ask me anything, or try a quick prompt below.`
     : 'LUNA-X online in offline mode. I understand habitat commands now; connect Claude (or a free AI) in “Connect AI” for full conversation, SELENE deep scans and check-ins.', 'system');
 }
 
@@ -312,7 +460,7 @@ function startRec(mode) {
   if (mode === 'ptt') { $('#mic').classList.add('live'); setMood('listening'); }
 }
 function stopRec() { const r = rec; recMode = null; rec = null; try { r?.stop(); } catch { /* ignore */ } $('#mic').classList.remove('live'); }
-$('#mic').onclick = () => (recMode === 'ptt' ? stopRec() : startRec('ptt'));
+$('#mic').onclick = () => (stopSpeaking(), recMode === 'ptt' ? stopRec() : startRec('ptt'));
 $('#wake').onchange = (e) => (e.target.checked ? startRec('wake') : stopRec());
 
 /* voice features vs calm baseline */
@@ -372,7 +520,7 @@ async function finishLog() {
   $('#ciResult').innerHTML = '<div class="holo">Analysing voice log…</div>';
   try {
     let r;
-    if (client) r = await voiceMood(ai, transcript, vs);
+    if (claudeOn()) r = await voiceMood(ai, transcript, vs);
     else {
       const t = transcript.toLowerCase();
       const m = /hopeless|empty|worthless|give up|pointless/.test(t) ? 'low' : /sad|lonely|miss|homesick|cry/.test(t) ? 'sad' : /anxious|panic|scared|nervous/.test(t) ? 'anxious' : /worr|unsure/.test(t) ? 'worried' : /angry|furious|annoyed/.test(t) ? 'angry' : /tired|exhausted|sleepy/.test(t) ? 'tired' : /happy|great|good|excited/.test(t) ? 'happy' : 'calm';
@@ -544,7 +692,7 @@ $('#ciFace').onclick = async () => {
     $('#ciResult').innerHTML = `<div class="holo"><div class="k">Face check-in · ${esc(c.name)}</div><h4>${esc(r.mood.toUpperCase())}</h4><div class="row"><span>Fatigue</span><b>${Math.round(r.fatigue * 100)}%</b></div><div class="row"><span>Stress</span><b>${Math.round(r.stress * 100)}%</b></div><p style="margin:6px 0 2px">${esc(r.summary)}</p><div style="font-size:12px;color:var(--mut)">${esc(r.signals.join(' · '))}${r.says_fine_but_differs ? ' · says fine, but behaviour differs' : ''}</div></div>`;
     timeline('det', `Face check-in ${c.name}: ${r.mood}`);
     const w = wellbeing(sim, c);
-    if (w.tier >= 1 && client) send(`(SELENE) ${c.name}'s face check-in shows ${r.mood}, fatigue ${Math.round(r.fatigue * 100)}%. Respond with the right tier.`);
+    if (w.tier >= 1 && claudeOn()) send(`(SELENE) ${c.name}'s face check-in shows ${r.mood}, fatigue ${Math.round(r.fatigue * 100)}%. Respond with the right tier.`);
   } catch (e) { $('#ciResult').innerHTML = `<div class="note">${esc(friendlyError(e))}</div>`; }
   $('#cbadge').textContent = 'FACE CHECK-IN';
   renderCheckins();
@@ -586,7 +734,7 @@ function breathing() {
       for (const [lbl, s, sc] of [['Breathe in', 4, 1], ['Hold', 7, 1], ['Breathe out', 8, 0.55]]) {
         if (stop) return;
         $('#brT').textContent = `${lbl} · ${s}`; const b = $('#br'); b.style.transitionDuration = s + 's'; b.style.transform = `scale(${sc})`;
-        if ($('#speak').checked) speak(lbl);
+        speak(lbl);
         await sleep(s * 1000);
       }
     }
@@ -722,7 +870,7 @@ $('#attacks').onclick = async (e) => {
   sim.network.segments[a.seg] = 'attacked'; emit(sim); renderLash(); flash('lash', 3000);
   timeline(a.sev === 'CRITICAL' ? 't3' : 't2', `LASH-Net attack: ${a.name}`);
   $('#netLog').insertAdjacentHTML('afterbegin', `<div style="color:var(--red)">${now()}  ATTACK ${esc(a.name)} on ${esc(a.seg)}: ${esc(a.log.join(' | '))}</div>`);
-  if (client) send(`[LASH-Net incident] ${a.name} (${a.sev}) on the ${a.seg} segment. Logs: ${a.log.join('; ')}. Analyse it, judge severity and respond with network_defense.`);
+  if (claudeOn()) send(`[LASH-Net incident] ${a.name} (${a.sev}) on the ${a.seg} segment. Logs: ${a.log.join('; ')}. Analyse it, judge severity and respond with network_defense.`);
   else {
     for (const act of CORRECT[id]) await execute('network_defense', { action: act, target: a.seg, reason: 'offline playbook' });
     if (a.sev === 'CRITICAL') await execute('network_defense', { action: 'alert_commander', target: a.seg, reason: 'critical incident' });
@@ -776,13 +924,36 @@ $('#provs').addEventListener('change', (e) => {
   const card = e.target.closest('[data-p]'); const f = e.target.dataset.f; if (!card || !f) return;
   const id = card.dataset.p;
   settings[id][f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value.trim();
+  if (f === 'proxy' && settings[id].proxy && (/anthropic\.com|claude\.ai/i.test(settings[id].proxy) || !/^https:\/\//.test(settings[id].proxy))) settings[id].proxy = '';
   if ((f === 'key' || f === 'proxy') && settings[id][f]) settings[id].enabled = true;
-  saveSettings(settings); rebuildClient(); renderProviders();
+  saveSettings(settings); rebuildClient();
+  if (f !== 'key' && f !== 'proxy') renderProviders(); // keep the key test result visible
+});
+// Live feedback while a key is typed or pasted: format check and connection status, no re-render (keeps focus)
+const KEY_SHAPE = { claude: [/^sk-ant-/, 'Claude keys start with sk-ant-'], gemini: [/^AIza/, 'Gemini keys start with AIza'], meta: [/^sk-or-/, 'OpenRouter keys start with sk-or-'], groq: [/^gsk_/, 'Groq keys start with gsk_'], openai: [/^sk-/, 'OpenAI keys start with sk-'] };
+$('#provs').addEventListener('input', (e) => {
+  const card = e.target.closest('[data-p]'); const f = e.target.dataset.f;
+  if (!card || (f !== 'key' && f !== 'proxy')) return;
+  const id = card.dataset.p, v = e.target.value.trim(), out = card.querySelector('[data-out]');
+  settings[id][f] = v;
+  if (v) settings[id].enabled = true;
+  const box = card.querySelector('input[data-f=enabled]'); if (box) box.checked = settings[id].enabled;
+  rebuildClient();
+  const shape = KEY_SHAPE[id];
+  if (f === 'key' && /^https?:|\.com|\.ai\b/i.test(v)) { settings[id].key = ''; rebuildClient(); out.textContent = '⚠ That is a web link, not a key. Open the “get one” link, create a key, then copy the long code (Claude keys start with sk-ant-) and paste it here.'; out.style.color = 'var(--amber)'; return; }
+  if (f === 'proxy' && v && (/anthropic\.com|claude\.ai/i.test(v) || !/^https:\/\//.test(v))) { settings[id].proxy = ''; rebuildClient(); out.textContent = '⚠ Leave this box empty unless you deployed your own Cloudflare Worker (see README). Paste your sk-ant- key in the API key box above.'; out.style.color = 'var(--amber)'; return; }
+  if (f === 'key' && v && shape && !shape[0].test(v)) { out.textContent = `⚠ That doesn't look right: ${shape[1]}.`; out.style.color = 'var(--amber, #fbbf24)'; return; }
+  if (f === 'key' && /\s/.test(e.target.value.trim())) { out.textContent = '⚠ The key has a space in it; paste it again.'; out.style.color = 'var(--amber, #fbbf24)'; return; }
+  out.textContent = v ? 'Key entered. Checking…' : ''; out.style.color = 'var(--mut)';
+  clearTimeout(card._t);
+  if (v) card._t = setTimeout(() => card.querySelector('[data-test]')?.click(), 900);
 });
 $('#provs').addEventListener('click', async (e) => {
   if (!e.target.matches('[data-test]')) return;
   const card = e.target.closest('[data-p]'), id = card.dataset.p, out = card.querySelector('[data-out]');
   card.querySelectorAll('input[data-f=key],input[data-f=proxy],input[data-f=model],input[data-f=base]').forEach((i) => { settings[id][i.dataset.f] = i.value.trim(); });
+  if (settings[id].proxy && (/anthropic\.com|claude\.ai/i.test(settings[id].proxy) || !/^https:\/\//.test(settings[id].proxy))) { settings[id].proxy = ''; card.querySelector('input[data-f=proxy]').value = ''; }
+  if (id === 'claude' && !settings.claude.key && !settings.claude.proxy) { out.textContent = '✗ Paste your Claude API key (starts with sk-ant-) in the API key box first.'; out.style.color = 'var(--red)'; return; }
   settings[id].enabled = true; saveSettings(settings); rebuildClient();
   out.textContent = 'Testing…'; core.setStatus(id, 'busy');
   try {
@@ -790,7 +961,7 @@ $('#provs').addEventListener('click', async (e) => {
       const m = await client.messages.create({ model: settings.claude.model, max_tokens: 2000, output_config: { effort: 'low' }, messages: [{ role: 'user', content: 'Reply with exactly: LUNA-X link OK' }] });
       return m.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
     });
-    out.textContent = '✓ ' + r; out.style.color = 'var(--ok)'; collab(id, 'Link test passed');
+    out.textContent = '✓ Connected: ' + r + (settings[id].remember || PROVIDERS[id].nokey ? '' : ' (tick Remember to keep it after a refresh)'); out.style.color = 'var(--ok)'; collab(id, 'Link test passed'); announceAI(id);
   } catch (err) { out.textContent = '✗ ' + (id === 'claude' ? friendlyError(err) : err.message); out.style.color = 'var(--red)'; collab(id, 'Link test failed', 'error'); }
   refreshCoreStatus();
 });
@@ -860,7 +1031,7 @@ onChange(sim, () => {
   if (fresh.length) {
     const texts = sim.alerts.filter((a) => fresh.includes(a.text.replace(/[\d.]+/g, '#')));
     texts.forEach((a) => timeline(a.level === 'RED' ? 't3' : 't2', `ALERT ${a.level}: ${a.text}`));
-    if ($('#autopilot').checked && client && !busy) send(`[Autopilot] New alert(s): ${texts.map((a) => `${a.level} ${a.text}`).join('; ')}. Assess and respond with the right tier.`);
+    if ($('#autopilot').checked && claudeOn() && !busy) send(`[Autopilot] New alert(s): ${texts.map((a) => `${a.level} ${a.text}`).join('; ')}. Assess and respond with the right tier.`);
   }
   prevAlertKeys = keys;
 });

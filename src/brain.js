@@ -40,7 +40,9 @@ export function makeClient({ apiKey, proxyUrl }) {
 }
 
 export function friendlyError(err) {
-  if (err instanceof Anthropic.AuthenticationError) return 'Claude rejected the API key. Check it in Connect.';
+  const msg = String(err?.message || '');
+  if (/credit balance/i.test(msg)) return 'Claude rejected the API key: the account has no API credits. Add credits at console.anthropic.com → Billing. A Claude.ai Pro or Max chat plan does not include API credits.';
+  if (err instanceof Anthropic.AuthenticationError) return 'Claude rejected the API key. Copy the whole key (it starts with sk-ant-api) from console.anthropic.com → API keys. A key is shown only once, so if you lost it, create a new one.';
   if (err instanceof Anthropic.PermissionDeniedError) return 'This key is not allowed to use that model.';
   if (err instanceof Anthropic.NotFoundError) return 'Model not found for this key. Pick another model in Connect.';
   if (err instanceof Anthropic.RateLimitError) return 'Rate limited by the API. Wait a moment and try again.';
@@ -61,13 +63,17 @@ function echoable(content) {
  * One user turn with tools. history is append-only (never edited) so thinking blocks stay valid and the cache prefix holds.
  * cb: { text(delta), thinking(on), toolStart(name), toolDone(name, input, result), done(final) }
  */
-export async function runTurn({ client, model, effort, history, execute, cb, signal }) {
+export const CLAUDE_TAKEOVER = SYSTEM + `
+
+TAKEOVER MODE: the crew has switched LUNA-X off and handed control of the habitat to you. You are Claude, made by Anthropic, speaking to the crew directly in your own voice, not as LUNA. You still have every habitat tool and SELENE's data, and you follow all the same safety, consent and tier rules. If asked, say LUNA-X is switched off and can be switched back on with the "In control" switch.`;
+
+export async function runTurn({ client, model, effort, history, execute, cb, signal, system = SYSTEM }) {
   const fb = MODELS[model]?.fallbacks;
   let jsonRetries = 0;
   for (let round = 0; round < 12; round++) {
     const params = {
       model, max_tokens: 64000,
-      system: SYSTEM,
+      system,
       cache_control: { type: 'ephemeral' },
       thinking: { type: 'adaptive', display: 'summarized' },
       output_config: { effort },

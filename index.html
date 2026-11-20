@@ -27,6 +27,30 @@ header{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:
 header img{width:46px;height:46px}
 .brand b{display:block;font:800 18px Orbitron,sans-serif;letter-spacing:.06em}
 .brand span{font-size:12px;color:var(--mut)}
+.linkup{display:flex;align-items:center;gap:0}
+.linkicons{display:flex;align-items:center;position:relative}.linkicons:empty{display:none}
+.lk{display:flex;align-items:center;animation:aiIn .5s ease-out}
+.lk .wire{width:16px;height:2px;background:linear-gradient(90deg,var(--cyan),var(--c));position:relative;overflow:hidden}
+.lk .wire::after{content:"";position:absolute;inset:0;width:6px;background:#fff;opacity:.9;animation:wire 1.4s linear infinite}
+@keyframes wire{from{transform:translateX(-6px)}to{transform:translateX(16px)}}
+.aiico{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;border:1.5px solid var(--c);background:color-mix(in srgb,var(--c) 18%,#050b1e);box-shadow:0 0 12px color-mix(in srgb,var(--c) 55%,transparent)}
+.aiico svg{width:17px;height:17px;color:var(--c)}
+.lk.untested .aiico{opacity:.55;border-style:dashed;box-shadow:none}.lk.untested .wire::after{display:none}
+.lktag{margin-left:8px;font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.14em;color:var(--cyan);border:1px solid rgba(56,189,248,.45);border-radius:6px;padding:2px 6px;white-space:nowrap}
+.m .who .ico{display:inline-grid;place-items:center;width:15px;height:15px;margin-right:5px;vertical-align:-3px}.m .who .ico svg{width:13px;height:13px}
+@media(max-width:560px){.aiico{width:24px;height:24px}.aiico svg{width:14px;height:14px}.lk .wire{width:9px}.lktag{display:none}}
+.seg{display:inline-flex;align-items:center;gap:0;border:1px solid var(--line);border-radius:999px;overflow:hidden;flex-wrap:wrap}
+.seg .seglbl{padding:3px 8px;color:var(--mut)}
+.seg button{background:none;border:0;border-left:1px solid var(--line);color:var(--mut);padding:4px 10px;font:inherit;cursor:pointer}
+.seg button.act{background:rgba(56,189,248,.18);color:var(--text)}
+.seg button[data-c=claude].act{background:rgba(217,119,87,.25)}
+.aibadges{display:flex;gap:6px;flex-wrap:wrap}.aibadges:empty{display:none}
+.aib{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:11.5px;font-weight:600;color:var(--text);border:1px solid var(--c);background:color-mix(in srgb,var(--c) 16%,transparent);box-shadow:0 0 14px color-mix(in srgb,var(--c) 35%,transparent);cursor:pointer;animation:aiIn .5s ease-out}
+.aib i{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 8px var(--c)}
+.aib.untested{opacity:.6;box-shadow:none;border-style:dashed}
+@keyframes aiIn{from{transform:scale(.5);opacity:0}}
+.m .who .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:1px}
+.m.join{border-left:3px solid var(--c)}
 .hstat{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line2);border-radius:999px;padding:4px 10px;font:500 11.5px 'JetBrains Mono',monospace;color:var(--mut);background:rgba(255,255,255,.03);white-space:nowrap}
 .pill i{width:7px;height:7px;border-radius:50%;background:var(--dim)}
@@ -73,6 +97,9 @@ main{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:14px;
 .composer textarea{flex:1;resize:none;min-height:40px;max-height:120px;background:rgba(0,0,0,.25);border:1px solid var(--line2);border-radius:12px;padding:9px 11px;outline:none}
 .composer textarea:focus{border-color:var(--cyan)}
 .iconbtn{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:rgba(8,16,40,.8);display:grid;place-items:center;flex:none}
+.iconbtn.off{opacity:.45}
+.iconbtn.talking{border-color:var(--cyan);box-shadow:0 0 0 4px rgba(34,211,238,.18)}
+.m .say{background:none;border:0;padding:0 2px;cursor:pointer;font-size:12px;opacity:.6}.m .say:hover{opacity:1}
 .iconbtn.live{border-color:var(--pink);box-shadow:0 0 0 4px rgba(244,114,182,.18);color:var(--pink)}
 .tabs{display:flex;gap:2px;overflow-x:auto;border-bottom:1px solid var(--line2);padding:6px 6px 0;scrollbar-width:thin}
 .tabs button{border:0;background:none;padding:9px 12px;border-radius:10px 10px 0 0;color:var(--mut);font-weight:600;font-size:13px;white-space:nowrap;border-bottom:2px solid transparent}
@@ -154,11 +181,12 @@ footer{text-align:center;color:var(--dim);font-size:12px;padding:6px 16px 28px}
 <body>
 <canvas id="stars" aria-hidden="true"></canvas>
 <header>
-  <img src="assets/luna-logo.svg" alt="LUNA-X AI mission patch">
+  <div class="linkup"><img src="assets/luna-logo.svg" alt="LUNA-X AI mission patch"><span class="linkicons" id="linkIcons" aria-live="polite"></span></div>
   <div class="brand"><b>LUNA-X AI</b><span>Lunar Adaptive Neural Assistant · works with <a href="https://jaigod.github.io/lunar-crew-monitor/" target="_blank" rel="noopener">SELENE</a> · Project ARES</span></div>
   <div class="hstat">
     <span class="pill" id="pClaude"><i></i>Claude: off</span>
     <span class="pill" id="pFree"><i></i>Free AI: 0</span>
+    <span class="aibadges" id="aiBadges" aria-label="Connected AI systems"></span>
     <span class="pill" id="pClock"><i></i>Day 37 · 07:10</span>
     <span class="pill" id="pAlerts"><i></i>No alerts</span>
     <button class="btn pri" id="btnConnect">Connect AI</button>
@@ -179,12 +207,17 @@ footer{text-align:center;color:var(--dim);font-size:12px;padding:6px 16px 28px}
       <div class="msgs" id="msgs" aria-live="polite"></div>
       <div class="quick" id="quick"></div>
       <div class="composer">
+        <button class="iconbtn" id="voiceBtn" title="LUNA speaks her replies (click to mute; click while she talks to stop)" aria-label="Voice on" aria-pressed="true">🔊</button>
         <button class="iconbtn" id="mic" title="Talk to LUNA (or say “Hey Luna”)" aria-label="Talk">🎙</button>
         <textarea id="input" rows="1" placeholder="Ask LUNA-X… (Enter to send, Shift+Enter for a new line)"></textarea>
         <button class="btn pri" id="send">Send</button>
       </div>
       <div class="row" style="padding:0 14px 10px;font-size:12px;color:var(--mut)">
-        <label><input type="checkbox" id="speak"> Speak replies</label>
+        <span class="seg" id="control" role="radiogroup" aria-label="Who is in control"><span class="seglbl">In control:</span><button data-c="team" role="radio">LUNA-X + Claude</button><button data-c="claude" role="radio">Claude takes over</button><button data-c="luna" role="radio">LUNA solo</button></span>
+        <label><input type="checkbox" id="speak" checked> Speak replies</label>
+        <label>Voice <select id="voicePick" class="inp" style="width:auto;max-width:170px;padding:3px 6px"><option value="">Auto (LUNA)</option></select></label>
+        <label>Speed <input type="range" id="voiceRate" min="0.7" max="1.5" step="0.05" value="1" style="width:70px;vertical-align:middle"></label>
+        <button class="btn sm" id="voiceTest">Test voice</button>
         <label><input type="checkbox" id="wake"> Hands-free “Hey Luna”</label>
         <label><input type="checkbox" id="autopilot"> Autopilot (LUNA reacts to new alerts)</label>
         <label>Talking as <select id="asCrew" class="inp" style="width:auto;padding:3px 6px"></select></label>
