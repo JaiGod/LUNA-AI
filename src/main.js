@@ -5,6 +5,7 @@ import {
 import { makeExecutor } from './tools.js';
 import { makeClient, runTurn, directClaude, structured, offlineReply, crisisCheck, friendlyError, MODELS, SYSTEM, CLAUDE_TAKEOVER } from './brain.js';
 import { md } from './md.js';
+import { initFx, launch } from './fx.js';
 import { createNebula } from './nebula.js';
 import { createChatView } from './chatview.js';
 import { onUsage, getUsage, resetUsage, fmtTokens, fmtUSD, DASHBOARDS, claudeUsage } from './usage.js';
@@ -58,7 +59,12 @@ function refreshCoreStatus() {
   const servers = [cOn && settings.claude.web !== false, cOn && settings.claude.web !== false, cOn && settings.claude.code !== false, !!settings.claude.proxy, sim.sensors.earth_link === 'up', true /* SELENE link */].filter(Boolean).length;
   core.setCharge((ais + servers) / (Object.keys(PROVIDERS).length + 6), `${ais} AI · ${servers} servers`);
 }
-function setMood(m, label) { core.setMood(m); $('#coreState').textContent = `LUNA-X · ${label || m}`; }
+function setMood(m, label) {
+  core.setMood(m); $('#coreState').textContent = `LUNA-X · ${label || m}`;
+  const busy = m === 'thinking';
+  document.body.classList.toggle('ai-busy', busy);
+  $('#pClaude').classList.toggle('busy', busy && !!client);
+}
 
 /* ---------- timeline + collaboration ---------- */
 function timeline(cls, text) {
@@ -583,7 +589,7 @@ const chatCard = document.querySelector('.card.chat');
 chatCard.addEventListener('dragover', (e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); });
 chatCard.addEventListener('drop', (e) => { if (e.dataTransfer?.files?.length) { e.preventDefault(); addFiles([...e.dataTransfer.files]); } });
 
-$('#send').onclick = () => send();
+$('#send').onclick = () => { if ($('#input').value.trim() || attachments.length) launch($('#send')); send(); };
 $('#input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 $('#newChat').onclick = () => { abortCtl?.abort(); history = []; pendingNotes = []; claudeSession.container = null; freeHistory.length = 0; lastWsSig = ''; $('#msgs').innerHTML = ''; greet(); };
 $('#asCrew').innerHTML = sim.crew.map((c) => `<option value="${c.id}">${esc(c.name)} (${esc(c.role)})</option>`).join('');
@@ -1207,6 +1213,7 @@ setInterval(() => { if (speedV) tick(sim, speedV); }, 1000);
 rebuildClient();
 renderTraining(); renderLash(); renderCheckins(); tick(sim, 0);
 greet();
+initFx();
 function providerError(id, err) {
   const m = String(err?.message || err);
   if (id === 'copilot' && /Failed to fetch|NetworkError|CORS/i.test(m)) return 'GitHub blocks direct browser calls to GitHub Models. Deploy the LUNA proxy (worker/) and set the Copilot API base URL to https://<your-worker>/github.';

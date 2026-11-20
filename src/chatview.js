@@ -164,7 +164,7 @@ export function createChatView(ctx) {
     document.body.classList.toggle('cv', cv);
     store.set(VIEW_KEY, v);
     if (cv) { $('#cvConv').append(chatCard); show(active); }
-    else { homeOfChat.insertBefore(chatCard, chatNext); Object.entries(chats).forEach(([k, c]) => { c.el.hidden = k !== 'luna'; }); chatCard.classList.remove('direct'); }
+    else { homeOfChat.insertBefore(chatCard, chatNext); Object.entries(chats).forEach(([k, c]) => { c.el.hidden = k !== 'luna'; }); chatCard.classList.remove('direct'); $('#input').placeholder = 'Ask LUNA-X anything…'; }
     $('#viewBtn').textContent = cv ? '🛰 Mission Control' : '💬 Chat view';
     window.dispatchEvent(new Event('resize'));
   }

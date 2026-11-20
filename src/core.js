@@ -147,7 +147,7 @@ export function createCore(canvas) {
     }
 
     // satellites + beams
-    const R = Math.min(W * 0.43, S * 1.9);
+    const R = Math.max(S * 1.15, Math.min(W * 0.43, S * 1.9, W / 2 - (W < 700 ? 74 : 96))); // leave room for labels on narrow screens
     sats.forEach((s) => {
       const ang = s.angle + (reduce ? 0 : t * 0.04);
       const sx = cx + Math.cos(ang) * R, sy = Math.max(84, cy + Math.sin(ang) * Math.min(R * 0.6, H * 0.4));
@@ -165,7 +165,9 @@ export function createCore(canvas) {
       if (on) { g.fillStyle = s.color; g.beginPath(); g.arc(sx, sy, s.ai ? 3 : 2.2, 0, 6.283); g.fill(); }
       g.font = `${s.ai ? 600 : 500} ${W < 520 ? 9.5 : 11}px Inter, system-ui, sans-serif`;
       g.fillStyle = on ? '#e6f1ff' : 'rgba(147,164,200,.6)'; g.textAlign = sx < cx - 4 ? 'right' : sx > cx + 4 ? 'left' : 'center';
-      g.fillText(s.label, sx + (sx < cx - 4 ? -11 : sx > cx + 4 ? 11 : 0), sy + 3.5);
+      const lx = sx + (sx < cx - 4 ? -11 : sx > cx + 4 ? 11 : 0), tw = g.measureText(s.label).width;
+      const fx = g.textAlign === 'right' ? Math.max(lx, tw + 6) : g.textAlign === 'left' ? Math.min(lx, W - tw - 6) : lx;
+      g.fillText(s.label, fx, sy + 3.5);
     });
     for (let k = pulses.length - 1; k >= 0; k--) {
       const p = pulses[k]; p.p += 0.03;

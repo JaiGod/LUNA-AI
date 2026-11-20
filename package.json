@@ -1,7 +1,7 @@
 {
   "name": "luna-x-ai",
   "version": "1.0.0",
-  "description": "LUNA-X AI: Claude-powered lunar habitat AI with SELENE, multi-model vision and crew wellbeing (NASA HUNCH student project)",
+  "description": "LUNA-X AI: the AI operating system for the Project ARES lunar habitat. Claude, Gemini, Llama and Copilot in one brain, with SELENE (NASA HUNCH student project)",
   "scripts": {
     "build": "esbuild src/main.js --bundle --format=esm --minify --target=es2022 --external:https://* --outfile=dist/luna.js"
   },

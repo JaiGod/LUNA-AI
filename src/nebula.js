@@ -23,6 +23,8 @@ export function createNebula(canvas, theme = 'projector') {
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   let W = 0, H = 0, dpr = 1, layers = [], stars = [], t = 0, raf = 0, last = 0, cur = NEBULA_THEMES[theme] ? theme : 'projector';
   let pc = null, petals = []; // projector: small offscreen canvas + light wisps
+  let shooters = [], px = 0, py = 0, tx = 0, ty = 0; // shooting stars and mouse parallax
+  if (!reduce) addEventListener('pointermove', (e) => { tx = (e.clientX / innerWidth - 0.5); ty = (e.clientY / innerHeight - 0.5); }, { passive: true });
   let seed = 7;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
 
@@ -120,12 +122,26 @@ export function createNebula(canvas, theme = 'projector') {
     g.globalCompositeOperation = 'source-over';
     // the projector turns, so its stars turn slowly around the burst too
     const rot = pc && !reduce ? t * 0.012 : 0, cx = W / 2, cy = H * 0.52, cr = Math.cos(rot), sr = Math.sin(rot);
+    px += (tx - px) * 0.05; py += (ty - py) * 0.05;
     for (const s of stars) {
       const a = 0.45 + 0.55 * Math.abs(Math.sin(t * s.sp + s.tw));
-      const dx = s.x - cx, dy = s.y - cy, x = cx + dx * cr - dy * sr, y = cy + dx * sr + dy * cr;
+      const depth = s.r * 6; // bigger stars are closer, so they move more
+      const dx = s.x - cx, dy = s.y - cy, x = cx + dx * cr - dy * sr - px * depth, y = cy + dx * sr + dy * cr - py * depth;
       g.globalAlpha = a; g.fillStyle = s.c;
       g.beginPath(); g.arc(x, y, s.r, 0, 6.283); g.fill();
       if (s.r > 1.5) { g.globalAlpha = a * 0.25; g.beginPath(); g.arc(x, y, s.r * 3, 0, 6.283); g.fill(); }
+    }
+    // shooting stars: one every few seconds
+    if (!reduce && Math.random() < 0.012 && shooters.length < 2) {
+      const ang = Math.PI * (0.12 + Math.random() * 0.18);
+      shooters.push({ x: Math.random() * W * 0.8, y: Math.random() * H * 0.4, vx: Math.cos(ang) * 14, vy: Math.sin(ang) * 14, life: 1 });
+    }
+    for (let k = shooters.length - 1; k >= 0; k--) {
+      const m = shooters[k]; m.x += m.vx; m.y += m.vy; m.life -= 0.025;
+      if (m.life <= 0) { shooters.splice(k, 1); continue; }
+      const gr = g.createLinearGradient(m.x, m.y, m.x - m.vx * 8, m.y - m.vy * 8);
+      gr.addColorStop(0, `rgba(220,255,250,${m.life})`); gr.addColorStop(1, 'rgba(120,255,240,0)');
+      g.strokeStyle = gr; g.lineWidth = 1.6; g.beginPath(); g.moveTo(m.x, m.y); g.lineTo(m.x - m.vx * 8, m.y - m.vy * 8); g.stroke();
     }
     g.globalAlpha = 1;
   }
