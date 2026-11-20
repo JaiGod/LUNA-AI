@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LUNA-X AI · Lunar Habitat Intelligence</title>
+<meta name="description" content="LUNA-X AI: the lunar habitat's AI operating system for Project ARES (NASA HUNCH). Claude-powered command brain working with SELENE, multi-model vision, crew wellbeing, drills and network defence.">
+<meta property="og:title" content="LUNA-X AI · Lunar Habitat Intelligence">
+<meta property="og:description" content="Claude-powered mission AI with SELENE health AI, SELENE Vision object detection, and a multi-model AI network.">
+<meta property="og:image" content="https://jaigod.github.io/LUNA-AI/assets/og.png">
+<link rel="icon" href="assets/luna-logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
+<style>
+:root{--void:#040816;--panel:rgba(12,22,50,.72);--panel2:rgba(255,255,255,.035);--line:rgba(56,189,248,.2);--line2:rgba(148,163,196,.16);
+--text:#e6f1ff;--mut:#93a4c8;--dim:#64748b;--cyan:#38bdf8;--pink:#f472b6;--violet:#a78bfa;--ok:#34d399;--amber:#fbbf24;--orange:#fb923c;--red:#f87171;
+--t1:#38bdf8;--t2:#fbbf24;--t3:#f87171;--r:16px}
+*{box-sizing:border-box}html,body{margin:0}[hidden]{display:none!important}
+body{background:radial-gradient(70% 50% at 85% -5%,rgba(244,114,182,.13),transparent 70%),radial-gradient(60% 45% at -5% 40%,rgba(29,78,216,.22),transparent 70%),var(--void);
+color:var(--text);font:14.5px/1.5 Inter,system-ui,sans-serif;min-height:100vh;overflow-x:hidden}
+#stars{position:fixed;inset:0;z-index:-1;pointer-events:none}
+a{color:var(--cyan)}button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+.mono{font-family:'JetBrains Mono',monospace}
+.k{font:500 10.5px 'JetBrains Mono',monospace;letter-spacing:.18em;text-transform:uppercase;color:var(--cyan)}
+header{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--line);background:rgba(4,8,22,.7);backdrop-filter:blur(12px);position:sticky;top:0;z-index:20;flex-wrap:wrap}
+header img{width:46px;height:46px}
+.brand b{display:block;font:800 18px Orbitron,sans-serif;letter-spacing:.06em}
+.brand span{font-size:12px;color:var(--mut)}
+.hstat{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line2);border-radius:999px;padding:4px 10px;font:500 11.5px 'JetBrains Mono',monospace;color:var(--mut);background:rgba(255,255,255,.03);white-space:nowrap}
+.pill i{width:7px;height:7px;border-radius:50%;background:var(--dim)}
+.pill.on i{background:var(--ok);box-shadow:0 0 8px var(--ok)}.pill.warn i{background:var(--amber)}.pill.bad i{background:var(--red)}
+.btn{border:1px solid rgba(90,184,255,.42);background:rgba(8,16,40,.8);border-radius:999px;padding:7px 13px;font-weight:600;font-size:13px;transition:border-color .15s,background .15s}
+.btn:hover{border-color:var(--cyan)}.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.pri{background:linear-gradient(135deg,#0ea5e9,#7c3aed);border-color:transparent}
+.btn.pink{background:linear-gradient(135deg,#be185d,#7c3aed);border-color:transparent}
+.btn.red{border-color:rgba(248,113,113,.6);color:#fecaca}.btn.sm{padding:4px 10px;font-size:12px}
+.btn.on{border-color:var(--ok);color:var(--ok)}
+main{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:14px;padding:14px 18px 8px;max-width:1600px;margin:0 auto}
+@media(max-width:1050px){main{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);backdrop-filter:blur(10px);min-width:0}
+.core{position:relative;height:430px;overflow:hidden}
+.core canvas{position:absolute;inset:0;width:100%;height:100%}
+.core .ttl{position:absolute;left:0;right:0;top:12px;text-align:center;pointer-events:none;padding:0 12px}
+.core .ttl b{font:800 clamp(13px,1.9vw,19px) Orbitron,sans-serif;letter-spacing:.14em;background:linear-gradient(90deg,#7dd3fc,#e0f2fe,#c4b5fd);-webkit-background-clip:text;background-clip:text;color:transparent}
+.core .ttl p{margin:4px auto 0;max-width:620px;font-size:11.5px;color:var(--mut)}
+.core .state{position:absolute;left:14px;bottom:12px;font:500 11px 'JetBrains Mono',monospace;color:var(--mut)}
+.core .decision{position:absolute;right:12px;bottom:12px;max-width:290px;display:none}
+.holo{background:linear-gradient(160deg,rgba(14,165,233,.18),rgba(124,58,237,.14));border:1px solid rgba(125,211,252,.45);border-radius:14px;padding:10px 12px;box-shadow:0 0 24px rgba(56,189,248,.18);backdrop-filter:blur(8px)}
+.holo h4{margin:2px 0 4px;font:700 14px Orbitron,sans-serif;letter-spacing:.04em}
+.holo .row{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--mut)}
+.holo .row b{color:var(--text);font-weight:600}
+.chat{display:flex;flex-direction:column;height:520px;margin-top:14px}
+.msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.m{max-width:88%;padding:9px 12px;border-radius:14px;white-space:pre-wrap;word-wrap:break-word}
+.m.u{align-self:flex-end;background:rgba(56,189,248,.14);border:1px solid rgba(56,189,248,.3)}
+.m.a{align-self:flex-start;background:rgba(255,255,255,.04);border:1px solid var(--line2)}
+.m.sys{align-self:center;font-size:12px;color:var(--mut);background:none;border:1px dashed var(--line2)}
+.m .who{font:600 10.5px 'JetBrains Mono',monospace;letter-spacing:.12em;color:var(--cyan);margin-bottom:3px;display:flex;gap:8px;align-items:center}
+.m .who em{font-style:normal;color:var(--dim);letter-spacing:0}
+.m .tools{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:5px}
+.chip{font:500 10.5px 'JetBrains Mono',monospace;border:1px solid var(--line2);border-radius:999px;padding:2px 8px;color:var(--mut);background:rgba(255,255,255,.03)}
+.chip.selene{border-color:rgba(244,114,182,.5);color:#fbcfe8}.chip.t1{border-color:rgba(56,189,248,.5)}.chip.t2{border-color:rgba(251,191,36,.6);color:#fde68a}.chip.t3{border-color:rgba(248,113,113,.7);color:#fecaca}.chip.err{border-color:var(--red);color:var(--red)}
+.m .rate{display:flex;gap:6px;margin-top:6px}
+.m .rate button{border:1px solid var(--line2);background:none;border-radius:8px;padding:1px 7px;font-size:12px;color:var(--mut)}
+.m .rate button.on{border-color:var(--ok);color:var(--ok)}
+.thinking{font-size:12px;color:var(--mut);font-style:italic}
+.quick{display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px;border-top:1px solid var(--line2)}
+.quick button{border:1px solid var(--line2);background:rgba(255,255,255,.03);border-radius:999px;padding:4px 10px;font-size:12px;color:var(--mut)}
+.quick button:hover{color:var(--text);border-color:var(--cyan)}
+.composer{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line2);align-items:flex-end}
+.composer textarea{flex:1;resize:none;min-height:40px;max-height:120px;background:rgba(0,0,0,.25);border:1px solid var(--line2);border-radius:12px;padding:9px 11px;outline:none}
+.composer textarea:focus{border-color:var(--cyan)}
+.iconbtn{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:rgba(8,16,40,.8);display:grid;place-items:center;flex:none}
+.iconbtn.live{border-color:var(--pink);box-shadow:0 0 0 4px rgba(244,114,182,.18);color:var(--pink)}
+.tabs{display:flex;gap:2px;overflow-x:auto;border-bottom:1px solid var(--line2);padding:6px 6px 0;scrollbar-width:thin}
+.tabs button{border:0;background:none;padding:9px 12px;border-radius:10px 10px 0 0;color:var(--mut);font-weight:600;font-size:13px;white-space:nowrap;border-bottom:2px solid transparent}
+.tabs button.act{color:var(--text);border-bottom-color:var(--cyan);background:rgba(56,189,248,.07)}
+.pane{display:none;padding:14px;max-height:900px;overflow-y:auto}.pane.act{display:block}
+.pane h3{margin:0 0 4px;font:700 15px Orbitron,sans-serif;letter-spacing:.04em}
+.pane .sub{color:var(--mut);font-size:12.5px;margin:0 0 12px}
+.grid{display:grid;gap:8px}.g3{grid-template-columns:repeat(3,minmax(0,1fr))}.g2{grid-template-columns:repeat(2,minmax(0,1fr))}.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:560px){.g3,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.g2{grid-template-columns:minmax(0,1fr)}}
+.tile{background:var(--panel2);border:1px solid var(--line2);border-radius:12px;padding:9px 10px;min-width:0}
+.tile .l{font:500 10px 'JetBrains Mono',monospace;letter-spacing:.1em;color:var(--mut);text-transform:uppercase}
+.tile .v{font:600 18px 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;margin-top:2px}
+.tile .v small{font-size:11px;color:var(--mut);margin-left:3px}
+.tile.warn{border-color:rgba(251,191,36,.55)}.tile.bad{border-color:rgba(248,113,113,.7);background:rgba(248,113,113,.07)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sec{margin-top:16px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+td,th{padding:6px 6px;border-bottom:1px solid var(--line2);text-align:left;vertical-align:middle}
+th{font:500 10px 'JetBrains Mono',monospace;letter-spacing:.1em;color:var(--mut);text-transform:uppercase}
+.sw{display:inline-block;width:12px;height:12px;border-radius:4px;vertical-align:-2px;margin-right:4px;border:1px solid rgba(255,255,255,.25)}
+.crew{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media(max-width:560px){.crew{grid-template-columns:minmax(0,1fr)}}
+.cc{background:var(--panel2);border:1px solid var(--line2);border-radius:14px;padding:11px}
+.cc h4{margin:0;font-size:14.5px}.cc .role{font-size:11.5px;color:var(--mut)}
+.tier{font:600 10.5px 'JetBrains Mono',monospace;padding:2px 8px;border-radius:999px;border:1px solid}
+.tier.t0{border-color:var(--ok);color:var(--ok)}.tier.t1{border-color:var(--t1);color:var(--t1)}.tier.t2{border-color:var(--t2);color:var(--t2)}.tier.t3{border-color:var(--t3);color:var(--t3)}
+.kv{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 8px;margin-top:8px;font-size:12px}
+.kv span{color:var(--mut)}.kv b{font-family:'JetBrains Mono',monospace;font-weight:500;color:var(--text);display:block}
+.bar{height:6px;border-radius:6px;background:rgba(255,255,255,.07);overflow:hidden}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--violet))}
+.cam{position:relative;aspect-ratio:4/3;background:#000;border-radius:14px;overflow:hidden;border:1px solid var(--line)}
+.cam video,.cam img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.cam video.mirror{transform:scaleX(-1)}
+.cam canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.cam .off{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--mut);padding:24px;font-size:13px}
+.cam .badge{position:absolute;left:10px;top:10px;font:500 10.5px 'JetBrains Mono',monospace;background:rgba(4,8,22,.78);border:1px solid var(--line);border-radius:999px;padding:3px 9px}
+.det{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.det .d{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:7px 9px;border-radius:12px;background:var(--panel2);border:1px solid var(--line2);cursor:pointer}
+.det .d:hover,.det .d.sel{border-color:var(--cyan)}
+.cat{font:600 9.5px 'JetBrains Mono',monospace;letter-spacing:.08em;padding:2px 6px;border-radius:6px;text-transform:uppercase}
+.cat.geology{background:rgba(251,191,36,.15);color:#fde68a}.cat.human{background:rgba(52,211,153,.15);color:#a7f3d0}.cat.equipment{background:rgba(56,189,248,.15);color:#bae6fd}.cat.hazard{background:rgba(248,113,113,.18);color:#fecaca}
+.votes{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.prov{background:var(--panel2);border:1px solid var(--line2);border-radius:14px;padding:11px;margin-bottom:10px}
+.prov.on{border-color:rgba(52,211,153,.5)}
+.prov h4{margin:0;font-size:14px;display:flex;align-items:center;gap:8px}
+.prov h4 i{width:10px;height:10px;border-radius:50%}
+.prov .free{font:600 9.5px 'JetBrains Mono',monospace;color:var(--ok);border:1px solid var(--ok);border-radius:6px;padding:1px 5px}
+.prov .paid{font:600 9.5px 'JetBrains Mono',monospace;color:var(--amber);border:1px solid var(--amber);border-radius:6px;padding:1px 5px}
+.prov label{font-size:11.5px;color:var(--mut);display:block;margin-top:6px}
+.prov input[type=text],.prov input[type=password],.prov select,.inp{width:100%;background:rgba(0,0,0,.28);border:1px solid var(--line2);border-radius:10px;padding:7px 9px;outline:none;font-size:13px}
+.prov input:focus,.inp:focus{border-color:var(--cyan)}
+.note{font-size:12px;color:var(--mut);background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.25);border-radius:10px;padding:8px 10px}
+.timeline{margin:6px 18px 24px;max-width:1564px;margin-left:auto;margin-right:auto}
+.tl{display:flex;gap:8px;overflow-x:auto;padding:10px 12px;scrollbar-width:thin}
+.ev{flex:none;width:250px;border-left:3px solid var(--line);background:var(--panel2);border-radius:8px;padding:6px 9px;font-size:12px}
+.ev .tm{font:500 10px 'JetBrains Mono',monospace;color:var(--mut)}
+.ev.t1{border-color:var(--t1)}.ev.t2{border-color:var(--t2)}.ev.t3{border-color:var(--t3)}.ev.ai{border-color:var(--violet)}.ev.det{border-color:var(--ok)}
+.toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:10px;z-index:50;max-width:min(360px,calc(100vw - 32px))}
+.toast{background:rgba(10,20,48,.96);border:1px solid var(--amber);border-radius:14px;padding:11px 12px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+.toast b{font-size:13px}.toast p{margin:4px 0 8px;font-size:13px}
+.banner{position:fixed;left:50%;top:76px;transform:translateX(-50%);z-index:60;width:min(680px,calc(100vw - 24px));background:rgba(60,8,16,.96);border:1px solid var(--red);border-radius:16px;padding:12px 14px;box-shadow:0 10px 60px rgba(248,113,113,.3);display:none}
+.banner h4{margin:0 0 4px;color:#fecaca;font:700 14px Orbitron,sans-serif;letter-spacing:.04em}
+.banner p{margin:4px 0;font-size:13px}
+.overlay{position:fixed;inset:0;background:rgba(2,4,12,.82);z-index:70;display:none;place-items:center;padding:16px}
+.overlay .box{max-width:520px;width:100%;text-align:center}
+.breath{width:220px;height:220px;border-radius:50%;margin:20px auto;background:radial-gradient(circle,rgba(56,189,248,.5),rgba(124,58,237,.25) 60%,transparent 70%);transform:scale(.55);transition:transform 4s ease-in-out}
+.pvt{height:180px;border-radius:14px;border:1px solid var(--line);display:grid;place-items:center;background:rgba(0,0,0,.3);font:700 38px 'JetBrains Mono',monospace;cursor:pointer;user-select:none}
+.pvt.go{background:rgba(248,113,113,.18);color:#fecaca;border-color:var(--red)}
+.seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.seg div{border:1px solid var(--line2);border-radius:12px;padding:8px;font-size:12px;background:var(--panel2)}
+.seg div b{display:block;font-size:12.5px}
+.seg .normal{border-color:rgba(52,211,153,.4)}.seg .locked{border-color:rgba(167,139,250,.6)}.seg .attacked{border-color:var(--red);background:rgba(248,113,113,.08)}
+.seg .blocked,.seg .contained,.seg .filtered,.seg .frozen{border-color:var(--amber)}
+.skill{display:grid;grid-template-columns:150px 1fr 34px;gap:8px;align-items:center;font-size:12.5px;margin:5px 0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+footer{text-align:center;color:var(--dim);font-size:12px;padding:6px 16px 28px}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+</style>
+</head>
+<body>
+<canvas id="stars" aria-hidden="true"></canvas>
+<header>
+  <img src="assets/luna-logo.svg" alt="LUNA-X AI mission patch">
+  <div class="brand"><b>LUNA-X AI</b><span>Lunar Adaptive Neural Assistant · works with <a href="https://jaigod.github.io/lunar-crew-monitor/" target="_blank" rel="noopener">SELENE</a> · Project ARES</span></div>
+  <div class="hstat">
+    <span class="pill" id="pClaude"><i></i>Claude: off</span>
+    <span class="pill" id="pFree"><i></i>Free AI: 0</span>
+    <span class="pill" id="pClock"><i></i>Day 37 · 07:10</span>
+    <span class="pill" id="pAlerts"><i></i>No alerts</span>
+    <button class="btn pri" id="btnConnect">Connect AI</button>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="card core" aria-label="LUNA-X cognitive core">
+      <canvas id="core"></canvas>
+      <div class="ttl"><b>LUNA-X AI SUPREME COGNITIVE CORE</b>
+        <p>Unified intelligence for lunar exploration, scientific discovery, habitat autonomy and human-AI collaboration. Lit beams are real, connected links.</p></div>
+      <div class="state mono" id="coreState">LUNA · idle</div>
+      <div class="decision holo" id="decision"></div>
+    </div>
+
+    <div class="card chat">
+      <div class="msgs" id="msgs" aria-live="polite"></div>
+      <div class="quick" id="quick"></div>
+      <div class="composer">
+        <button class="iconbtn" id="mic" title="Talk to LUNA (or say “Hey Luna”)" aria-label="Talk">🎙</button>
+        <textarea id="input" rows="1" placeholder="Ask LUNA-X… (Enter to send, Shift+Enter for a new line)"></textarea>
+        <button class="btn pri" id="send">Send</button>
+      </div>
+      <div class="row" style="padding:0 14px 10px;font-size:12px;color:var(--mut)">
+        <label><input type="checkbox" id="speak"> Speak replies</label>
+        <label><input type="checkbox" id="wake"> Hands-free “Hey Luna”</label>
+        <label><input type="checkbox" id="autopilot"> Autopilot (LUNA reacts to new alerts)</label>
+        <label>Talking as <select id="asCrew" class="inp" style="width:auto;padding:3px 6px"></select></label>
+        <button class="btn sm" id="newChat" style="margin-left:auto">New conversation</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" style="display:flex;flex-direction:column">
+    <nav class="tabs" role="tablist" id="tabs">
+      <button data-t="habitat" class="act">Habitat</button>
+      <button data-t="crew">Crew · SELENE</button>
+      <button data-t="vision">SELENE Vision</button>
+      <button data-t="checkin">Check-in</button>
+      <button data-t="wellness">Wellness Dock</button>
+      <button data-t="training">Training</button>
+      <button data-t="lash">LASH-Net</button>
+      <button data-t="network">AI Network</button>
+    </nav>
+
+    <div class="pane act" id="t-habitat">
+      <h3>Habitat systems</h3>
+      <p class="sub">Nine sensors, nine rooms, and NASA limits. LUNA responds in three tiers: silent change, an offer you can refuse, a human when it's serious.</p>
+      <div class="grid g3" id="sensors"></div>
+      <div class="sec row">
+        <span class="k">Simulation</span>
+        <select id="speed" class="inp" style="width:auto"><option value="1">1 s = 1 min</option><option value="10">1 s = 10 min</option><option value="60">1 s = 1 h</option><option value="0">Paused</option></select>
+        <button class="btn sm" id="evNight">Toggle lunar night</button>
+        <button class="btn sm" id="evStorm">Solar storm</button>
+        <button class="btn sm" id="evCo2">CO₂ scrubber fault</button>
+        <button class="btn sm" id="evClear">Clear events</button>
+      </div>
+      <div class="sec"><span class="k">Rooms</span><table><thead><tr><th>Room</th><th>Temp</th><th>Set</th><th>Lighting</th><th>Sound</th><th>Crew</th></tr></thead><tbody id="rooms"></tbody></table></div>
+      <div class="sec"><span class="k">Schedule</span><div id="schedule" class="sub" style="margin-top:6px"></div></div>
+    </div>
+
+    <div class="pane" id="t-crew">
+      <h3>Crew health · from SELENE</h3>
+      <p class="sub">SELENE measures; LUNA decides. Scores compare each person with their own baseline. Data is simulated. <a href="https://jaigod.github.io/lunar-crew-monitor/" target="_blank" rel="noopener">Open SELENE ↗</a></p>
+      <div class="crew" id="crewCards"></div>
+    </div>
+
+    <div class="pane" id="t-vision">
+      <h3>SELENE Vision · space object recognition</h3>
+      <p class="sub">Live: an on-device detector maps what the camera sees to space classes (person → crew, bottle → O₂ canister, scissors → tool). Deep scan: Claude classifies geology, crew, equipment and hazards. Verify: every connected AI votes and LUNA-X fuses the result.</p>
+      <div class="cam" id="vcam"><video id="vvid" class="mirror" playsinline muted></video><img id="vimg" alt="" hidden><canvas id="vov"></canvas>
+        <div class="off" id="voff">Start the camera or upload a photo (a lunar sample photo works well). Nothing is uploaded until you press Deep scan.</div>
+        <div class="badge" id="vbadge">SELENE VISION · OFF</div></div>
+      <div class="row sec">
+        <button class="btn" id="vStart">Start camera</button>
+        <label class="btn" style="display:inline-block">Upload image<input type="file" id="vFile" accept="image/*" hidden></label>
+        <button class="btn pri" id="vScan">Deep scan (SELENE)</button>
+        <button class="btn pink" id="vVerify">Verify with all AIs</button>
+        <label style="font-size:12px;color:var(--mut)"><input type="checkbox" id="vLive" checked> Live detector</label>
+      </div>
+      <p class="sub" id="vScene" style="margin-top:10px"></p>
+      <div class="det" id="vList"></div>
+    </div>
+
+    <div class="pane" id="t-checkin">
+      <h3>Wellbeing check-in</h3>
+      <p class="sub">Face check-in (SELENE / Luna Companion) and voice log (Astronaut Voice Log). Frames and audio are processed only when you start a check-in and are never stored.</p>
+      <div class="row"><span class="k">Crew member</span><select id="ciCrew" class="inp" style="width:auto"></select>
+        <input id="ciSelf" class="inp" style="flex:1;min-width:160px" placeholder="How do you feel? (optional self-report)"></div>
+      <div class="grid g2 sec">
+        <div>
+          <div class="cam" id="ccam" style="aspect-ratio:4/3"><video id="cvid" class="mirror" playsinline muted></video><div class="off" id="coff">Camera off</div><div class="badge" id="cbadge">FACE CHECK-IN</div></div>
+          <div class="row" style="margin-top:8px"><button class="btn pri" id="ciFace">30-second face check-in</button></div>
+        </div>
+        <div>
+          <div class="tile" style="min-height:150px"><div class="l">Voice log</div>
+            <p id="vlText" style="margin:6px 0;font-size:13px;color:var(--mut)">Say “start log”, talk about your day, then “stop log”. The AI estimates mood from your words and how your voice compares with your calm baseline.</p>
+            <div class="mono" id="vlMeter" style="font-size:11.5px;color:var(--mut)"></div></div>
+          <div class="row" style="margin-top:8px"><button class="btn" id="vlBase">Record calm baseline (10 s)</button><button class="btn pri" id="vlStart">Start log</button></div>
+        </div>
+      </div>
+      <div class="sec" id="ciResult"></div>
+      <div class="sec"><span class="k">Recent check-ins</span><div id="ciHist" class="sub" style="margin-top:6px"></div></div>
+    </div>
+
+    <div class="pane" id="t-wellness">
+      <h3>Wellness Dock</h3>
+      <p class="sub">LUNA VR's Wellness Dock: ISS-style reaction test, breathing, workout coach with form checks, and messages from Earth.</p>
+      <div class="grid g2">
+        <div class="tile"><div class="l">Reaction test (PVT)</div>
+          <p class="sub" style="margin:4px 0 8px">10 trials. Click or press Space the instant the box turns red. Slow results and lapses (&gt;500 ms) can hold an EVA.</p>
+          <div class="pvt" id="pvt" tabindex="0">Start</div><div class="mono" id="pvtOut" style="font-size:12px;margin-top:6px;color:var(--mut)"></div></div>
+        <div class="tile"><div class="l">Workout coach</div>
+          <div class="row" style="margin-top:6px"><select id="woEx" class="inp" style="width:auto"></select>
+            <button class="btn sm" id="woRep">+1 rep</button><span class="mono" id="woCount">0 reps</span></div>
+          <div class="cam" style="aspect-ratio:16/10;margin-top:8px"><video id="wvid" class="mirror" playsinline muted></video><div class="off" id="woff">Camera off — tap Form check</div></div>
+          <div class="row" style="margin-top:8px"><button class="btn" id="woForm">Form check</button><button class="btn pri" id="woDone">Finish workout</button></div>
+          <div id="woCues" class="sub" style="margin-top:6px"></div>
+          <div id="woPB" class="mono" style="font-size:11.5px;color:var(--mut)"></div></div>
+      </div>
+      <div class="grid g2 sec">
+        <div class="tile"><div class="l">Breathing</div><p class="sub" style="margin:4px 0 8px">Guided 4-7-8 breathing, four rounds.</p><button class="btn" id="breathBtn">Start breathing</button></div>
+        <div class="tile"><div class="l">Messages from Earth</div>
+          <div class="row" style="margin-top:6px"><button class="btn sm" id="earthPlay">Play one</button></div>
+          <input class="inp" id="earthNew" placeholder="Record a message for a crew member (family side)" style="margin-top:8px">
+          <div class="row" style="margin-top:6px"><select id="earthTo" class="inp" style="width:auto"></select><button class="btn sm" id="earthAdd">Save message</button></div>
+          <input class="inp" id="callHome" placeholder="Send a message home (1.3 s light delay)" style="margin-top:8px"><div class="row" style="margin-top:6px"><button class="btn sm" id="callSend">Send home</button><span class="mono" id="callOut" style="font-size:11.5px;color:var(--mut)"></span></div></div>
+      </div>
+    </div>
+
+    <div class="pane" id="t-training">
+      <h3>Training hub · LUNA learns from the crew</h3>
+      <p class="sub">Rate LUNA's answers (👍 / 👎) and correct her. Corrections are stored and LUNA checks them before answering. Drills and inspections move six skill areas.</p>
+      <div id="skills"></div>
+      <div class="sec"><span class="k">Emergency drills</span><div class="grid g3" id="drills" style="margin-top:6px"></div><div id="drillScore" class="sec"></div></div>
+      <div class="sec"><span class="k">Panel inspection (predictive maintenance)</span>
+        <div class="row" style="margin-top:6px"><label class="btn">Photo of a panel<input type="file" id="inspFile" accept="image/*" hidden></label><span class="sub" style="margin:0">Claude scores condition and books maintenance.</span></div>
+        <div id="inspOut" class="sec"></div></div>
+      <div class="sec"><span class="k">Corrections LUNA has learned</span><div id="corr" class="sub" style="margin-top:6px"></div></div>
+      <div class="sec"><span class="k">Learning log</span><div id="learnLog" class="mono" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div></div>
+      <div class="sec"><button class="btn sm red" id="resetAll">Reset all learning and logs</button></div>
+    </div>
+
+    <div class="pane" id="t-lash">
+      <h3>LASH-Net · habitat network defence</h3>
+      <p class="sub">Life support sits on a segment nothing a person types on can route to. Launch an attack; LUNA reads the logs, judges severity and responds. The score rises less each time she sees the same attack.</p>
+      <div class="seg" id="segs"></div>
+      <div class="sec"><span class="k">Attack console</span><div class="grid g3" id="attacks" style="margin-top:6px"></div></div>
+      <div class="sec"><span class="k">Responses</span><div id="netLog" class="mono" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div></div>
+    </div>
+
+    <div class="pane" id="t-network">
+      <h3>AI Network · LUNA-X orchestrator</h3>
+      <p class="sub">LUNA-X is not one AI. It routes each task to the best connected model and fuses their answers. Keys stay in this browser (optional “remember”) and go only to that provider. Free options are marked FREE.</p>
+      <div class="note" style="margin-bottom:10px">Routing: Claude runs LUNA's reasoning, tools, safety checks and SELENE deep scans. Gemini, OpenAI and Llama independently verify each detection, and LUNA-X fuses the votes. With no Claude key, LUNA answers commands offline and uses any connected free AI for conversation.</div>
+      <div id="provs"></div>
+      <div class="sec"><span class="k">Live AI collaboration stream</span><div id="collab" class="mono" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div></div>
+    </div>
+  </section>
+</main>
+
+<section class="card timeline" aria-label="Activity timeline"><div class="row" style="padding:10px 12px 0"><span class="k">AI activity timeline</span><span class="sub" style="margin:0">Tier 1 blue · Tier 2 amber · Tier 3 red · AI violet · detections green</span></div><div class="tl" id="timeline"></div></section>
+
+<footer>LUNA-X AI is a NASA HUNCH student project demo (Project ARES). All crew, habitat and health data is simulated; it is not a medical device. If you are in danger in real life, call 988 (US) or your local emergency number.<br>
+<a href="https://jaigod.github.io/LunarSmartAdaptiveHabitat/">Main project site</a> · <a href="https://jaigod.github.io/lunar-crew-monitor/">SELENE</a> · <a href="https://github.com/JaiGod/LUNA-AI">Source</a></footer>
+
+<div class="toasts" id="toasts"></div>
+<div class="banner" id="banner" role="alert"></div>
+<div class="overlay" id="overlay"><div class="box" id="overlayBox"></div></div>
+
+<script type="module" src="dist/luna.js"></script>
+</body>
+</html>
