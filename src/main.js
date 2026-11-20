@@ -343,7 +343,7 @@ function syncVoiceUI() {
   $('#speak').checked = voicePrefs.on;
   $('#voiceRate').value = voicePrefs.rate;
   const b = $('#voiceBtn');
-  b.textContent = voicePrefs.on ? '🔊' : '🔇';
+  b.innerHTML = voicePrefs.on ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m22 9-6 6M16 9l6 6"/></svg>';
   b.classList.toggle('off', !voicePrefs.on);
   b.setAttribute('aria-pressed', String(voicePrefs.on));
   b.setAttribute('aria-label', voicePrefs.on ? 'Voice on' : 'Voice off');

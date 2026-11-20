@@ -183,7 +183,7 @@ export function createChatView(ctx) {
   $('#viewBtn').onclick = () => setView(document.body.classList.contains('cv') ? 'mission' : 'chat');
   $('#cvConnect').onclick = () => { setView('mission'); $('#btnConnect').click(); };
   $('#cvWorkspace').onclick = () => { setView('mission'); $('[data-t=workspace]').click(); $('#t-workspace').scrollIntoView({ behavior: 'smooth' }); };
-  $('#cvOpts').onclick = () => chatCard.classList.toggle('opts');
+  $('#cvOpts').onclick = () => chatCard.classList.toggle('show-opts');
   $('#cvModel').onchange = (e) => { settings.claude.model = e.target.value; ctx.saveSettings(settings); ctx.rebuildClient(); renderSide(); renderTop(); };
   $('#cvName').onclick = () => { const n = prompt('What should LUNA-X call you?', store.get(NAME_KEY, '')); if (n != null) { store.set(NAME_KEY, n.trim().slice(0, 40)); renderHero(); } };
   $('#cvSky').innerHTML = Object.entries(NEBULA_THEMES).map(([k, t]) => `<option value="${k}">${t.label} sky</option>`).join('');
