@@ -4,6 +4,9 @@ import {
 } from './sim.js';
 import { makeExecutor } from './tools.js';
 import { makeClient, runTurn, structured, offlineReply, crisisCheck, friendlyError, MODELS, SYSTEM, CLAUDE_TAKEOVER } from './brain.js';
+import { md } from './md.js';
+import { onUsage, getUsage, resetUsage, fmtTokens, fmtUSD, DASHBOARDS, claudeUsage } from './usage.js';
+import { ws, saveWs, onWorkspace, AGENTS, remember, forget, addProject, activeProject, wsContext, wsSignature, routeTask } from './workspace.js';
 import { createVision, loadDetector, detectLive, grabFrame, deepScan, faceCheckin, voiceMood, inspectPanel, formCheck, pitchOf } from './vision.js';
 import { PROVIDERS, loadSettings, saveSettings, isConnected, testProvider, callProvider, verifyDetections, verifiersOnline, freeChatOrder, onCollab, collab, chromeAvailable } from './orchestrator.js';
 import { createCore } from './core.js';
@@ -17,7 +20,11 @@ const sim = createSim();
 const vision = createVision();
 let settings = loadSettings();
 let history = [];          // Claude conversation, append-only
-let pendingNotes = [];     // events LUNA should know about, sent with the next user message
+let pendingNotes = [];
+const claudeSession = {};   // code-execution container reused across turns
+const freeHistory = [];    // conversation memory for the free AIs
+let rollbackTo = null;
+let lastWsSig = '';      // workspace context is re-sent to Claude only when it changes     // events LUNA should know about, sent with the next user message
 let busy = false, abortCtl = null;
 
 /* ---------- starfield ---------- */
@@ -67,6 +74,11 @@ onCollab((e) => {
   if (e.state !== 'working') timeline('ai', `${name}: ${e.text}`);
   if (e.provider !== 'lunax') { e.state === 'working' ? core.setStatus(e.provider, 'busy') : e.state === 'error' ? core.setStatus(e.provider, 'error') : refreshCoreStatus(); }
 });
+
+function toast(msg) {
+  const el = document.createElement('div'); el.className = 'toast'; el.innerHTML = `<p style="margin:0">${esc(msg)}</p>`;
+  $('#toasts').append(el); setTimeout(() => el.remove(), 5000);
+}
 
 /* ---------- UI hooks used by tools ---------- */
 const ui = {
@@ -202,6 +214,52 @@ function setControl(next) {
   el.classList.add('join'); el.style.setProperty('--c', control === 'luna' ? 'var(--cyan)' : PROVIDERS.claude.color);
   speak(text);
 }
+/* ---------- Workspace tab: agents, routing, memory, projects ---------- */
+function renderWorkspace() {
+  $('#agentSel').innerHTML = Object.entries(AGENTS).map(([id, a]) => `<option value="${id}" ${id === ws.agent ? 'selected' : ''}>${a.icon} ${esc(a.name)}</option>`).join('');
+  $('#agents').innerHTML = Object.entries(AGENTS).map(([id, a]) => `<div class="agent ${id === ws.agent ? 'act' : ''}" data-agent="${id}" role="button" tabindex="0"><b>${a.icon} ${esc(a.name)}</b><span>${esc(a.blurb)}</span></div>`).join('');
+  $('#autoRoute').checked = ws.autoRoute; $('#memOn').checked = ws.memoryOn;
+  $('#memList').innerHTML = ws.memory.length ? ws.memory.map((m) => `<div class="mem"><span>${esc(m.text)}</span><small>${esc(m.source)} · ${new Date(m.t).toLocaleDateString()}</small><button data-forget="${m.id}" aria-label="Forget">✕</button></div>`).join('') : '<p class="sub" style="margin:0">Nothing saved yet. Say “remember that …”, or LUNA saves lasting facts as you talk.</p>';
+  $('#projSel').innerHTML = ws.projects.map((p) => `<option value="${p.id}" ${p.id === ws.active ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  const p = activeProject();
+  if (document.activeElement !== $('#projNotes')) $('#projNotes').value = p?.notes || '';
+  $('#projLog').innerHTML = p?.log.length ? p.log.slice(-8).reverse().map((l) => `<div>${new Date(l.t).toLocaleDateString()}  ${esc(l.note)}</div>`).join('') : 'No progress logged yet.';
+}
+function setAgent(id) { if (!AGENTS[id] || id === ws.agent) return; ws.agent = id; saveWs(); toast(`${AGENTS[id].icon} ${AGENTS[id].name} is now active.`); }
+$('#agentSel').onchange = (e) => setAgent(e.target.value);
+$('#agents').onclick = (e) => { const a = e.target.closest('[data-agent]'); if (a) setAgent(a.dataset.agent); };
+$('#autoRoute').onchange = (e) => { ws.autoRoute = e.target.checked; saveWs(); };
+$('#memOn').onchange = (e) => { ws.memoryOn = e.target.checked; saveWs(); };
+$('#memList').onclick = (e) => { const id = e.target.dataset?.forget; if (id) forget(id); };
+$('#memAdd').onclick = () => { if ($('#memNew').value.trim()) { remember($('#memNew').value, 'you'); $('#memNew').value = ''; } };
+$('#projSel').onchange = (e) => { ws.active = e.target.value; saveWs(); };
+$('#projNew').onclick = () => { const n = prompt('Project name?'); if (n?.trim()) addProject(n.trim()); };
+$('#projNotes').onchange = (e) => { const p = activeProject(); if (p) { p.notes = e.target.value.slice(0, 6000); saveWs(); } };
+$('#projContinue').onclick = () => send(`Continue my project "${activeProject()?.name}": remind me where we left off and suggest the next steps.`);
+$('#projReport').onclick = () => { const topic = prompt('Research topic?', 'Lunar radiation shielding'); if (topic) { setAgent('researcher'); send(`Research ${topic}. Search for strong sources, then give me a report with citations, a 6-slide presentation outline, and a reference list.`); } };
+onWorkspace(renderWorkspace);
+renderWorkspace();
+
+/* ---------- usage meter ---------- */
+function renderUsage() {
+  const u = getUsage();
+  const ids = Object.keys(PROVIDERS).filter((id) => u.total[id] || isConnected(settings, id));
+  const cell = (b, k) => (b?.[k] ? fmtTokens(b[k]) : '0');
+  $('#usageTable').innerHTML = '<tr><th>AI</th><th>Requests today</th><th>Tokens today (in / out)</th><th>Requests total</th><th>Tokens total (in / out)</th><th>Web searches</th><th>Est. cost today</th><th>Est. cost total</th><th></th></tr>'
+    + (ids.length ? ids.map((id) => { const t = u.total[id], d = u.today[id], free = PROVIDERS[id].free;
+      return `<tr><td><span class="ico" style="color:${PROVIDERS[id].color};display:inline-grid;width:14px;vertical-align:-2px">${AI_ICON[id] || ''}</span> ${esc(PROVIDERS[id].name)}</td><td>${d?.requests || 0}</td><td>${cell(d, 'input')} / ${cell(d, 'output')}</td><td>${t?.requests || 0}</td><td>${cell(t, 'input')} / ${cell(t, 'output')}</td><td>${t?.searches || 0}</td><td class="${free ? 'free' : ''}">${free ? 'free' : fmtUSD(d?.cost || 0)}</td><td class="${free ? 'free' : ''}">${free ? 'free' : fmtUSD(t?.cost || 0)}</td><td>${DASHBOARDS[id] ? `<a href="${DASHBOARDS[id]}" target="_blank" rel="noopener">official ↗</a>` : 'on device'}</td></tr>`; }).join('')
+    : '<tr><td colspan="9" style="text-align:left">No AI connected yet.</td></tr>');
+  $('#usageSince').textContent = 'Counting since ' + new Date(u.since).toLocaleDateString();
+  const todayCost = Object.values(u.today).reduce((a, b) => a + (b.cost || 0), 0);
+  const todayReq = Object.values(u.today).reduce((a, b) => a + (b.requests || 0), 0);
+  $('#pUsage').lastChild.textContent = `Usage: ${fmtUSD(todayCost)} today · ${todayReq} req`;
+  $('#pUsage').className = 'pill ' + (todayReq ? 'on' : '');
+}
+onUsage(renderUsage);
+addEventListener('storage', (e) => { if (e.key === 'luna-ai-usage-v1') renderUsage(); });
+$('#usageReset').onclick = () => { if (confirm('Reset the usage meter? (This does not change anything at the providers.)')) resetUsage(); };
+$('#pUsage').onclick = () => { $('#btnConnect').click(); setTimeout(() => $('#usageTable').scrollIntoView({ behavior: 'smooth', block: 'center' }), 300); };
+renderUsage();
 $('#control').onclick = (e) => { const c = e.target.dataset?.c; if (c) setControl(c); };
 syncControlUI();
 const ai = {
@@ -216,6 +274,7 @@ const ai = {
 const QUICK = [
   'Morning status report', 'How is the crew? Ask SELENE', 'Forecast the next 3 days', 'Is Lena ready for an EVA?',
   'Set the quarters to pre-sleep lighting', "I can't sleep", 'Tell me a joke', 'What does SELENE Vision see?',
+  'Search the web for the latest Artemis Moon mission news', 'Write Python that plots lunar day vs night temperature', 'Explain how CO₂ scrubbers work, like I am 12',
 ];
 $('#quick').innerHTML = QUICK.map((q) => `<button>${esc(q)}</button>`).join('');
 $('#quick').onclick = (e) => { if (e.target.tagName === 'BUTTON') send(e.target.textContent); };
@@ -227,7 +286,7 @@ function addMsg(role, text, extra = '') {
   else el.innerHTML = `<div class="body"></div>`;
   el.querySelector('.body').textContent = text;
   const say = el.querySelector('.say');
-  if (say) say.onclick = () => speak(el.querySelector('.body').textContent, true);
+  if (say) say.onclick = () => speak(el._raw || el.querySelector('.body').textContent, true);
   $('#msgs').append(el); $('#msgs').scrollTop = 1e9;
   return el;
 }
@@ -330,11 +389,14 @@ $('#voiceRate').oninput = (e) => { voicePrefs.rate = +e.target.value; saveVoice(
 $('#voiceTest').onclick = () => speak('Hello, I am LUNA-X, the habitat AI. SELENE and I are watching over the crew.', true);
 
 async function send(textIn) {
-  const text = (textIn ?? $('#input').value).trim();
-  if (!text || busy) return;
+  const files = textIn == null ? attachments.splice(0) : [];
+  renderAttachments();
+  const text = (textIn ?? $('#input').value).trim() || (files.length ? 'Please look at the attached file' + (files.length > 1 ? 's' : '') + '.' : '');
+  if (!text || busy) { attachments.unshift(...files); renderAttachments(); return; }
   $('#input').value = '';
   const who = crewById(sim, $('#asCrew').value);
-  addMsg('u', text);
+  const uel = addMsg('u', text);
+  if (files.length) uel.insertAdjacentHTML('beforeend', `<div class="attnote">📎 ${files.map((f) => esc(f.name)).join(', ')}</div>`);
   busy = true; $('#send').disabled = true;
 
   // Crisis words go to a human right away, offline, before any network call.
@@ -348,21 +410,39 @@ async function send(textIn) {
   if (claudeOn()) setVia(el, 'claude', control === 'claude' ? aiLabel('claude') + ' in control' : 'via ' + aiLabel('claude'));
   if (claudeOn() && control === 'claude') { el.querySelector('.nm').textContent = 'CLAUDE'; el.querySelector('.nm').style.color = PROVIDERS.claude.color; }
   const body = el.querySelector('.body'), tools = el.querySelector('.tools');
+  // Auto-routing: with Claude linked, some tasks go to a better-suited connected AI
+  let routed = null;
+  if (claudeOn() && control === 'team' && ws.autoRoute) {
+    const r = routeTask(text, { hasFiles: files.length > 0, connected: freeChatOrder(settings) });
+    if (r.id !== 'claude') routed = r;
+  }
   try {
-    if (claudeOn()) {
+    if (claudeOn() && !routed) {
       setMood('thinking');
       const notes = pendingNotes.length ? `[Habitat events since my last message: ${pendingNotes.join(' ')}]\n` : '';
       pendingNotes = [];
-      history.push({ role: 'user', content: `${notes}[${who.name}, ${who.role}, habitat time ${clock(sim)}] ${text}` });
+      const turnStart = history.length;
+      const sig = wsSignature();
+      const ctx = turnStart === 0 || sig !== lastWsSig ? wsContext({ full: true }) : wsContext({ full: false });
+      lastWsSig = sig;
+      const line = `${ctx ? ctx + '\n' : ''}${notes}[${who.name}, ${who.role}, habitat time ${clock(sim)}] ${text}`;
+      history.push({ role: 'user', content: files.length ? [...files.map(claudeBlock), { type: 'text', text: line }] : line });
       const startLen = history.length;
+      rollbackTo = turnStart;
+      const cites = new Map(), found = new Map();
       abortCtl = new AbortController();
       let think = null;
       const res = await runTurn({
         client, model: settings.claude.model, effort: settings.claude.effort, history, execute, signal: abortCtl.signal, system: control === 'claude' ? CLAUDE_TAKEOVER : SYSTEM,
+        web: settings.claude.web !== false, code: settings.claude.code !== false, session: claudeSession,
         cb: {
           text: (d) => { if (think) { think.remove(); think = null; } setMood('speaking', 'answering'); body.textContent += d; $('#msgs').scrollTop = 1e9; },
           thinking: (on) => { if (on && !think) { think = document.createElement('div'); think.className = 'thinking'; think.textContent = 'LUNA-X is thinking…'; el.insertBefore(think, body); setMood('thinking'); } },
           toolStart: (name) => { flash(TOOL_SAT[name] || 'habitat'); setMood('thinking', name.replace(/_/g, ' ')); },
+          serverStart: (name) => { flash('claude'); setMood('thinking', name === 'web_search' ? 'searching the web' : name === 'web_fetch' ? 'reading a page' : 'running code'); },
+          server: (name, label, input) => { const q = input?.query || input?.url || ''; tools.insertAdjacentHTML('beforeend', `<span class="chip ${/web/.test(name) ? 'web' : 'code'}">${name === 'web_search' ? '🔎' : name === 'web_fetch' ? '🌐' : '⌨'} ${esc(label)}${q ? ': ' + esc(String(q).slice(0, 60)) : ''}</span>`); },
+          sources: (list) => list.forEach((s) => cites.set(s.url, s.title)),
+          found: (list) => list.forEach((s) => found.set(s.url, s.title)),
           toolDone: (name, input, r) => {
             const tier = name === 'adjust_habitat' ? 't1' : name === 'make_offer' ? 't2' : name === 'escalate_to_human' ? 't3' : name === 'ask_selene' ? 'selene' : '';
             const label = name === 'ask_selene' ? `LUNA → SELENE: ${input.topic} (${input.crew_id})` : name.replace(/_/g, ' ');
@@ -377,18 +457,28 @@ async function send(textIn) {
       } else if (res.model && res.model !== settings.claude.model) {
         el.querySelector('.who em').textContent = `${res.model} (fallback)`;
       }
-      body.textContent = body.textContent.trim();
+      finishBody(el, body.textContent.trim(), cites.size ? cites : new Map([...found].slice(0, 5)));
+      rollbackTo = null;
       collab('claude', 'Reasoning and safety review complete');
     } else {
-      let reply = await offlineReply(text, async (n, i) => { flash(TOOL_SAT[n] || 'habitat'); return execute(n, i); });
+      let free = freeChatOrder(settings);
+      if (routed) { free = [routed.id, ...free.filter((x) => x !== routed.id)]; tools_chip(el, `↪ routed to ${PROVIDERS[routed.id].name}: ${routed.why}`); }
+      const memCmd = text.match(/^(?:please )?remember(?: that)?[:,]?\s+(.{3,})$/i);
+      const forgetCmd = text.match(/^forget(?: that| about)?\s+(.{2,})$/i);
+      // with attachments or a routed task, go straight to an AI; otherwise LUNA's onboard commands run first
+      let reply = memCmd ? (remember(memCmd[1]), `Saved to my long-term memory: “${memCmd[1]}”. See it in Workspace.`)
+        : forgetCmd && forget(forgetCmd[1]) ? `Forgotten: “${forgetCmd[1]}”.`
+        : /^what do you (remember|know about me)/i.test(text) ? (ws.memory.length ? 'Here is what I remember: ' + ws.memory.map((m) => m.text).join('; ') + '.' : 'Nothing yet. Tell me “remember that …”.')
+        : (files.length || routed) && free.length ? "I'm in offline mode" : await offlineReply(text, async (n, i) => { flash(TOOL_SAT[n] || 'habitat'); return execute(n, i); });
+      let srcs = new Map();
       if (reply.startsWith("I'm in offline mode")) {
-        const free = freeChatOrder(settings);
-        if (free.length) reply = await freeChat(free, text, who, el);
+        if (free.length) { const r = await freeChat(free, text, who, el, files); reply = r.text; srcs = r.sources; }
+        else if (files.length) reply = 'Connect Claude or a free AI (Gemini reads images and PDFs) in Connect AI, and I can read your files.';
       }
-      body.textContent = reply;
+      finishBody(el, reply, srcs);
     }
     addRating(el, text);
-    speak(body.textContent);
+    speak(el._raw || body.textContent);
   } catch (err) {
     if (err?.name === 'AbortError') body.textContent += ' [stopped]';
     else {
@@ -398,32 +488,92 @@ async function send(textIn) {
         const fallback = await offlineReply(text, execute);
         if (!fallback.startsWith("I'm in offline mode")) addMsg('a', fallback, 'LUNA took over: Claude unreachable');
       }
-      // the failed user turn is removed so the next request starts clean
-      while (history.length && history.at(-1).role === 'user' && typeof history.at(-1).content === 'string') history.pop();
+      // the failed turn is removed from the tail so the next request starts clean
+      if (rollbackTo != null) { history.length = rollbackTo; rollbackTo = null; }
     }
   } finally {
     busy = false; $('#send').disabled = false; abortCtl = null;
     if (!speechSynthesis?.speaking) setMood('idle');
   }
 }
-async function freeChat(order, text, who, el) {
+async function freeChat(order, text, who, el, files = []) {
   const ctx = JSON.stringify({ habitat: JSON.parse((await execute('get_habitat_status', {})).content).sensors, crew: JSON.parse((await execute('ask_selene', { crew_id: 'all', topic: 'overview' })).content).crew, corrections: sim.learning.corrections.slice(-5) });
-  const system = `You are LUNA-X, the AI of a simulated lunar habitat (NASA HUNCH student project), working with SELENE, the crew health AI. Be warm and brief (1-4 sentences). You are not a doctor. Habitat and crew data: ${ctx}`;
+  const system = `You are LUNA-X, the AI of a simulated lunar habitat (NASA HUNCH student project), working with SELENE, the crew health AI. You are also a complete general assistant: help with any request (questions on any subject, explanations, homework, writing, math, translation, code in any language), giving complete answers at whatever length the task needs, using Markdown (lists, tables, fenced code blocks) when it helps. For habitat and crew chat, be warm and brief (1-4 sentences). You are not a doctor. When web search is available, use it for current information and mention sources. Habitat and crew data: ${ctx}`;
+  const wctx = wsContext({ full: true });
+  const textFiles = files.filter((f) => f.kind === 'text');
+  const prompt = `${who.name}: ${text}` + textFiles.map((f) => `\n\nAttached file ${f.name}:\n\`\`\`\n${f.text}\n\`\`\``).join('');
+  const binFiles = files.filter((f) => f.kind !== 'text').map((f) => ({ mime: f.mime, data: f.data }));
   for (const id of order) {
     try {
       collab(id, 'Answering crew conversation…', 'working');
-      const out = await callProvider(settings, id, { system, text: `${who.name}: ${text}`, onProgress: (p) => { el.querySelector('.who em').textContent = `${PROVIDERS[id].name}: ${p}`; } });
-      collab(id, 'Crew conversation answered');
+      const usable = id === 'gemini' ? binFiles : binFiles.filter((f) => f.mime.startsWith('image/'));
+      if (binFiles.length && !usable.length && order.length > 1) throw new Error(`${PROVIDERS[id].name} can't read that file type here`);
+      const sources = new Map();
+      const args = { system: wctx ? system + '\n\n' + wctx : system, text: prompt, files: usable, history: freeHistory.slice(-12), maxTokens: 4000, onSources: (l) => l.forEach((s) => sources.set(s.url, s.title)), onProgress: (p) => { el.querySelector('.who em').textContent = `${PROVIDERS[id].name}: ${p}`; } };
+      let out;
+      try { out = await callProvider(settings, id, { ...args, search: id === 'gemini' && settings.claude.web !== false }); }
+      catch (e) { if (id !== 'gemini') throw e; out = await callProvider(settings, id, args); } // retry Gemini without search grounding
+      collab(id, 'Answered');
       setVia(el, id, 'via ' + PROVIDERS[id].name + (PROVIDERS[id].free ? ' (free)' : ''));
-      return out.trim();
+      if (sources.size) tools_chip(el, '🔎 searched the web (Google)');
+      freeHistory.push({ role: 'user', text: prompt.slice(0, 6000) }, { role: 'assistant', text: out.trim().slice(0, 6000) });
+      if (freeHistory.length > 24) freeHistory.splice(0, freeHistory.length - 24);
+      return { text: out.trim(), sources };
     } catch (e) { collab(id, `Failed: ${e.message}`, 'error'); }
   }
-  return 'No connected AI could answer. I still understand the offline commands.';
+  return { text: 'No connected AI could answer. I still understand the offline commands.', sources: new Map() };
 }
+function tools_chip(el, label) { el.querySelector('.tools')?.insertAdjacentHTML('beforeend', `<span class="chip web">${esc(label)}</span>`); }
+// Render a finished reply as Markdown, keep the raw text for speech, and list sources
+function finishBody(el, raw, sources = new Map()) {
+  const body = el.querySelector('.body');
+  el._raw = raw;
+  body.innerHTML = md(raw);
+  body.querySelectorAll('pre').forEach((pre) => { const b = document.createElement('button'); b.className = 'copy'; b.textContent = 'Copy'; b.onclick = () => { navigator.clipboard?.writeText(pre.textContent.replace(/^Copy/, '')).then(() => { b.textContent = 'Copied'; }); }; pre.prepend(b); });
+  if (sources.size) el.querySelector('.body').insertAdjacentHTML('afterend', `<div class="sources">Sources: ${[...sources].slice(0, 8).map(([u, t]) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer" title="${esc(u)}">${esc(t)}</a>`).join('')}</div>`);
+}
+
+/* ---------- attachments (images, PDFs, text and code files) ---------- */
+let attachments = [];
+function claudeBlock(f) {
+  if (f.kind === 'image') return { type: 'image', source: { type: 'base64', media_type: f.mime, data: f.data } };
+  if (f.kind === 'pdf') return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.data }, title: f.name };
+  return { type: 'document', source: { type: 'text', media_type: 'text/plain', data: f.text }, title: f.name };
+}
+const readAs = (file, how) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r[how](file); });
+async function imageToJpeg(file) {
+  const url = await readAs(file, 'readAsDataURL');
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+  const k = Math.min(1, 1568 / Math.max(img.width, img.height));
+  const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.88);
+}
+async function addFiles(list) {
+  for (const file of list) {
+    try {
+      if (attachments.length >= 10) { toast('Up to 10 files per message.'); break; }
+      if (file.type.startsWith('image/')) { const url = await imageToJpeg(file); attachments.push({ kind: 'image', name: file.name || 'pasted image', mime: 'image/jpeg', data: url.split(',')[1], preview: url }); }
+      else if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) { if (file.size > 20e6) { toast(`${file.name} is over 20 MB.`); continue; } const url = await readAs(file, 'readAsDataURL'); attachments.push({ kind: 'pdf', name: file.name, mime: 'application/pdf', data: url.split(',')[1] }); }
+      else { if (file.size > 400e3) { toast(`${file.name} is over 400 KB of text.`); continue; } attachments.push({ kind: 'text', name: file.name, mime: 'text/plain', text: await readAs(file, 'readAsText') }); }
+    } catch { toast(`Could not read ${file.name}.`); }
+  }
+  renderAttachments();
+}
+function renderAttachments() {
+  $('#attachList').innerHTML = attachments.map((f, i) => `<span class="att">${f.preview ? `<img src="${f.preview}" alt="">` : `<span class="ext">${f.kind === 'pdf' ? 'PDF' : 'TXT'}</span>`}${esc(f.name.slice(0, 28))}<button data-i="${i}" aria-label="Remove ${esc(f.name)}">✕</button></span>`).join('');
+}
+$('#attach').onclick = () => $('#fileIn').click();
+$('#fileIn').onchange = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
+$('#attachList').onclick = (e) => { const i = e.target.dataset?.i; if (i != null) { attachments.splice(+i, 1); renderAttachments(); } };
+$('#input').addEventListener('paste', (e) => { const imgs = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/')); if (imgs.length) { e.preventDefault(); addFiles(imgs); } });
+const chatCard = document.querySelector('.card.chat');
+chatCard.addEventListener('dragover', (e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); });
+chatCard.addEventListener('drop', (e) => { if (e.dataTransfer?.files?.length) { e.preventDefault(); addFiles([...e.dataTransfer.files]); } });
 
 $('#send').onclick = () => send();
 $('#input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
-$('#newChat').onclick = () => { abortCtl?.abort(); history = []; pendingNotes = []; $('#msgs').innerHTML = ''; greet(); };
+$('#newChat').onclick = () => { abortCtl?.abort(); history = []; pendingNotes = []; claudeSession.container = null; freeHistory.length = 0; lastWsSig = ''; $('#msgs').innerHTML = ''; greet(); };
 $('#asCrew').innerHTML = sim.crew.map((c) => `<option value="${c.id}">${esc(c.name)} (${esc(c.role)})</option>`).join('');
 function greet() {
   addMsg('a', claudeOn()
@@ -906,7 +1056,8 @@ async function renderProviders() {
       fields = `<label>API key (sk-ant-…) <a href="${p.keyUrl}" target="_blank" rel="noopener">get one ↗</a></label><input type="password" data-f="key" value="${esc(s.key)}" placeholder="sk-ant-..." autocomplete="off">
         <label>…or a proxy URL that holds the key (see README: Cloudflare Worker)</label><input type="text" data-f="proxy" value="${esc(s.proxy)}" placeholder="https://luna-proxy.yourname.workers.dev">
         <div class="grid g2"><div><label>Model</label><select data-f="model">${Object.entries(MODELS).map(([m, x]) => `<option value="${m}" ${m === s.model ? 'selected' : ''}>${x.label}</option>`).join('')}</select></div>
-        <div><label>Effort</label><select data-f="effort">${['low', 'medium', 'high', 'xhigh', 'max'].map((e) => `<option ${e === s.effort ? 'selected' : ''}>${e}</option>`).join('')}</select></div></div>`;
+        <div><label>Effort</label><select data-f="effort">${['low', 'medium', 'high', 'xhigh', 'max'].map((e) => `<option ${e === s.effort ? 'selected' : ''}>${e}</option>`).join('')}</select></div></div>
+        <div class="row" style="margin-top:6px"><label style="font-size:12px"><input type="checkbox" data-f="web" ${s.web !== false ? 'checked' : ''}> Web search + read pages</label><label style="font-size:12px"><input type="checkbox" data-f="code" ${s.code !== false ? 'checked' : ''}> Run code</label><span class="sub" style="margin:0;font-size:11px">Web search costs about $10 per 1,000 searches on your key</span></div>`;
     } else if (p.nokey) {
       fields = `<p class="sub" style="margin:6px 0 0">${id === 'chrome' ? `No key. Status in this browser: <b>${esc(chrome)}</b>.` : 'No key. Needs WebGPU; the first use downloads the model (about 1 GB) and caches it.'}</p>${id === 'webllm' ? `<label>Model</label><input type="text" data-f="model" value="${esc(s.model)}">` : ''}`;
     } else {
@@ -959,6 +1110,7 @@ $('#provs').addEventListener('click', async (e) => {
   try {
     const r = await testProvider(settings, id, async () => {
       const m = await client.messages.create({ model: settings.claude.model, max_tokens: 2000, output_config: { effort: 'low' }, messages: [{ role: 'user', content: 'Reply with exactly: LUNA-X link OK' }] });
+      claudeUsage('claude', m.usage, settings.claude.model);
       return m.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
     });
     out.textContent = '✓ Connected: ' + r + (settings[id].remember || PROVIDERS[id].nokey ? '' : ' (tick Remember to keep it after a refresh)'); out.style.color = 'var(--ok)'; collab(id, 'Link test passed'); announceAI(id);

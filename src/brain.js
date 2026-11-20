@@ -1,6 +1,7 @@
 // LUNA's brain: Claude (when connected) with an offline fallback, like SELENE's two AI modes.
 import Anthropic from '@anthropic-ai/sdk';
 import { TOOLS } from './tools.js';
+import { claudeUsage } from './usage.js';
 
 export const MODELS = {
   'claude-opus-5-5': { label: 'Claude Opus 5.5 (best)', fallbacks: true },
@@ -22,7 +23,11 @@ Use the tools rather than guessing: read get_habitat_status before talking about
 
 When SELENE Vision reports objects, explain each one's significance for the mission: scientific value (basalt, anorthosite, regolith, ice, ore, volcanic glass), resource value, hazard level, and a clear next step (collect, analyse, avoid, repair, report). Say plainly that classifications from a camera are estimates.
 
-You are not a doctor and never diagnose. You are warm, calm and brief: crew read you at 3 a.m. and hear you through a speaker, so answer in one to four short sentences or a short numbered plan, in plain words without markdown headings. In a drill, give a numbered plan of at most five steps. If someone is in danger in real life, tell them this is a simulation and give a real crisis line (988 in the US, or local emergency services).`;
+You are not a doctor and never diagnose. In habitat and crew conversation you are warm, calm and brief: crew read you at 3 a.m. and hear you through a speaker, so answer in one to four short sentences or a short numbered plan. In a drill, give a numbered plan of at most five steps.
+
+You are also a complete general assistant with everything Claude can do, not only the habitat. Help with any request: answer questions on any subject, explain, teach and tutor, write and edit (essays, stories, emails, scripts), brainstorm, plan, translate, do math step by step, and write, explain and debug code in any language. You have server tools: web_search for current information (use it for news, recent events, prices, facts you are unsure of, or when asked to look something up), web_fetch to read a specific web page or link the user gives, and code_execution to run Python for calculations, data analysis, simulations and checking code. You can read images, PDFs and files the user attaches: describe, analyse, summarise or answer questions about them. For these tasks give complete, high-quality answers at whatever length the task needs, and use Markdown freely (headings, lists, tables, fenced code blocks with a language). When you used web search, mention your sources.
+
+LUNA-X Workspace: user messages may carry [Active agent], [Long-term memory] and [Active project] notes. Take on the active agent's role. Use memory naturally, and when the user shares a lasting fact about themselves, their projects, goals or preferences, save it with the remember tool (never passwords or keys). When real progress is made on the active project, log it with update_project so "continue my project" works next time. Keep the habitat persona light outside habitat topics: you are still LUNA-X, but you don't need to bring the habitat into unrelated answers. If someone is in danger in real life, tell them this is a simulation and give a real crisis line (988 in the US, or local emergency services).`;
 
 /* ---------- local crisis check: always offline, never waits for the network ---------- */
 const CRISIS = /\b(suicid\w*|kill (my|him|her)self|end (it all|my life)|self[- ]?harm|hurt myself|want to die|don'?t want to (live|be here)|can'?t go on|no reason to live|overdose)\b/i;
@@ -67,7 +72,13 @@ export const CLAUDE_TAKEOVER = SYSTEM + `
 
 TAKEOVER MODE: the crew has switched LUNA-X off and handed control of the habitat to you. You are Claude, made by Anthropic, speaking to the crew directly in your own voice, not as LUNA. You still have every habitat tool and SELENE's data, and you follow all the same safety, consent and tier rules. If asked, say LUNA-X is switched off and can be switched back on with the "In control" switch.`;
 
-export async function runTurn({ client, model, effort, history, execute, cb, signal, system = SYSTEM }) {
+export const SERVER_TOOLS = {
+  web: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }, { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 5 }],
+  code: [{ type: 'code_execution_20260120', name: 'code_execution' }],
+};
+const SERVER_LABEL = { web_search: 'searched the web', web_fetch: 'read a web page', code_execution: 'ran code', bash_code_execution: 'ran code', text_editor_code_execution: 'edited a file' };
+
+export async function runTurn({ client, model, effort, history, execute, cb, signal, system = SYSTEM, web = true, code = true, session = {} }) {
   const fb = MODELS[model]?.fallbacks;
   let jsonRetries = 0;
   for (let round = 0; round < 12; round++) {
@@ -77,7 +88,8 @@ export async function runTurn({ client, model, effort, history, execute, cb, sig
       cache_control: { type: 'ephemeral' },
       thinking: { type: 'adaptive', display: 'summarized' },
       output_config: { effort },
-      tools: TOOLS,
+      tools: [...TOOLS, ...(web ? SERVER_TOOLS.web : []), ...(code ? SERVER_TOOLS.code : [])],
+      ...(session.container ? { container: session.container } : {}),
       messages: history,
       ...(fb ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {}),
     };
@@ -86,6 +98,7 @@ export async function runTurn({ client, model, effort, history, execute, cb, sig
       if (ev.type === 'content_block_start') {
         if (ev.content_block.type === 'thinking') cb.thinking(true);
         if (ev.content_block.type === 'tool_use') cb.toolStart(ev.content_block.name);
+        if (ev.content_block.type === 'server_tool_use') cb.serverStart?.(ev.content_block.name);
         if (ev.content_block.type === 'text') cb.thinking(false);
       }
       if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') cb.text(ev.delta.text);
@@ -94,11 +107,18 @@ export async function runTurn({ client, model, effort, history, execute, cb, sig
     try {
       msg = await stream.finalMessage();
       jsonRetries = 0;
+      claudeUsage('claude', msg.usage, MODELS[msg.model] ? msg.model : model);
     } catch (err) {
       if (err instanceof Anthropic.APIError || err?.name === 'AbortError' || jsonRetries++ >= 2) throw err;
       continue; // a tool input could not be parsed at all: re-issue the turn
     }
     if (msg.stop_reason === 'refusal') return { refused: true, details: msg.stop_details };
+    if (msg.container?.id) session.container = msg.container.id; // keep files and variables between code runs
+    for (const b of msg.content) {
+      if (b.type === 'server_tool_use') cb.server?.(b.name, SERVER_LABEL[b.name] || b.name, b.input);
+      if (b.type === 'text' && b.citations?.length) cb.sources?.(b.citations.filter((c) => c.url).map((c) => ({ url: c.url, title: c.title || c.url })));
+      if (b.type === 'web_search_tool_result' && Array.isArray(b.content)) cb.found?.(b.content.filter((r) => r.url).map((r) => ({ url: r.url, title: r.title || r.url })));
+    }
     const toolUses = msg.content.filter((b) => b.type === 'tool_use');
     if (msg.stop_reason === 'pause_turn') { history.push({ role: 'assistant', content: echoable(msg.content) }); continue; }
     if (toolUses.length && msg.stop_reason === 'max_tokens') throw new Error('A tool request was cut off (max_tokens). Please ask again.');
@@ -126,6 +146,7 @@ export async function structured({ client, model, effort = 'low', system, conten
     ...(fb ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {}),
   };
   const msg = fb ? await client.beta.messages.create(params, { signal }) : await client.messages.create(params, { signal });
+  claudeUsage('claude', msg.usage, MODELS[msg.model] ? msg.model : model);
   if (msg.stop_reason === 'refusal') throw new Error('Claude declined this request.');
   const text = msg.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
   return JSON.parse(text);

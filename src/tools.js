@@ -1,5 +1,6 @@
 // LUNA's tools. Claude decides when to call them; the browser runs them against the simulation.
 // Inputs are validated here before anything runs (eager input streaming turns server-side validation off).
+import { remember as rememberFact, forget as forgetFact, logProject } from './workspace.js';
 import {
   LIMITS, LIGHTING, SOUNDS, MOODS, SKILLS, DRILLS, ATTACKS, NET_ACTIONS,
   wellbeing, eegState, forecast, bestInterventions, crewById, clock, save, emit, learnLog, bumpSkill,
@@ -14,6 +15,15 @@ const T = (name, description, properties, required = []) => ({
 });
 
 export const TOOLS = [
+  T('remember', 'Save a lasting fact to LUNA-X long-term memory so it is known in future conversations: the user\'s name, school, projects, goals, preferences, deadlines. Do not save passwords, keys or other secrets, or passing small talk.', {
+    fact: { type: 'string', description: 'One short self-contained fact, e.g. "Jai is building a NASA HUNCH lunar habitat with Angel and Farhan"' },
+  }, ['fact']),
+  T('forget_memory', 'Delete a saved memory when the user asks you to forget something or a memory is wrong.', {
+    memory: { type: 'string', description: 'The memory number (e.g. "3") or words from it' },
+  }, ['memory']),
+  T('update_project', 'Log meaningful progress, decisions or next steps on the active Workspace project so the user can continue later.', {
+    note: { type: 'string', description: 'What was done or decided, and the next step' },
+  }, ['note']),
   T('get_habitat_status', 'Read the habitat sensors (cabin air, power, water, radiation, dust, lunar day/night, Earth link), every room, active alerts, the current drill or network incident, and the schedule. Call this before answering anything about the habitat.', {}),
   T('ask_selene', 'Ask SELENE, the crew health AI, for health data. SELENE tracks vitals (HR, HRV, SpO2, BP, temperature), sleep, hydration, exercise countermeasures, radiation dose, EEG state, mood history, camera/voice check-ins, reaction tests and a wellbeing score against each person\'s own baseline with a response tier (0 none, 1 mild, 2 moderate, 3 severe). SELENE also reports what it has learned helps each person. Detail is hidden for crew who have not consented to sharing beyond the habitat.', {
     crew_id: { type: 'string', enum: crewIds, description: "Crew member id, or 'all' for a crew overview" },
@@ -239,6 +249,9 @@ export function makeExecutor(sim, ui, vision) {
       return { ok: true, playing: kind };
     },
     get_vision_detections() { return vision.snapshot(); },
+    remember({ fact }) { const m = rememberFact(fact, 'LUNA-X'); return m ? { ok: true, saved: m } : { error: 'empty fact' }; },
+    forget_memory({ memory }) { const n = forgetFact(memory); return n ? { ok: true, removed: n } : { error: 'no memory matched' }; },
+    update_project({ note }) { const p = logProject(note); return p ? { ok: true, project: p.name, entries: p.log.length } : { error: 'no active project' }; },
   };
 
   return async function execute(name, input) {

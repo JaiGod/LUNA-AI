@@ -2,6 +2,7 @@
 // Claude goes through the Anthropic SDK (brain.js). The other providers use their public REST APIs
 // with the user's own key, or run free on the device (Chrome built-in AI, WebLLM).
 import { SPACE_CLASSES } from './vision.js';
+import { recordUsage } from './usage.js';
 
 const SETTINGS_KEY = 'luna-ai-providers-v1';
 
@@ -47,31 +48,39 @@ const parseJSON = (t) => {
   return JSON.parse(m[0]);
 };
 
-async function geminiCall(cfg, { system, text, images = [], json = false, signal }) {
+// history: [{role:'user'|'assistant', text}], files: [{mime, data(base64)}], search: Google Search grounding
+async function geminiCall(cfg, { system, text, images = [], files = [], history = [], search = false, json = false, maxTokens, onSources, onUsage, signal }) {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent`, {
     method: 'POST', signal,
     headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.key },
     body: JSON.stringify({
       systemInstruction: system ? { parts: [{ text: system }] } : undefined,
-      contents: [{ role: 'user', parts: [...images.map((b) => ({ inline_data: { mime_type: 'image/jpeg', data: b } })), { text }] }],
-      generationConfig: json ? { responseMimeType: 'application/json' } : undefined,
+      contents: [...history.map((h) => ({ role: h.role === 'assistant' ? 'model' : 'user', parts: [{ text: h.text }] })), { role: 'user', parts: [...images.map((b) => ({ inline_data: { mime_type: 'image/jpeg', data: b } })), ...files.map((f) => ({ inline_data: { mime_type: f.mime, data: f.data } })), { text }] }],
+      tools: search ? [{ google_search: {} }] : undefined,
+      generationConfig: json ? { responseMimeType: 'application/json' } : maxTokens ? { maxOutputTokens: maxTokens } : undefined,
     }),
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error?.message || `Gemini HTTP ${res.status}`);
+  const um = j.usageMetadata || {};
+  onUsage?.({ input: um.promptTokenCount || 0, output: (um.candidatesTokenCount || 0) + (um.thoughtsTokenCount || 0), searches: search && j.candidates?.[0]?.groundingMetadata?.webSearchQueries?.length ? 1 : 0 });
+  const chunks = j.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+  if (onSources && chunks.length) onSources(chunks.filter((c) => c.web?.uri).map((c) => ({ url: c.web.uri, title: c.web.title || c.web.uri })));
   return (j.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
 }
 
-async function openaiCompatCall(cfg, { system, text, images = [], signal }) {
-  const content = images.length ? [{ type: 'text', text }, ...images.map((b) => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b}` } }))] : text;
+async function openaiCompatCall(cfg, { system, text, images = [], files = [], history = [], maxTokens = 1500, onUsage, signal }) {
+  const pics = [...images.map((b) => `data:image/jpeg;base64,${b}`), ...files.filter((f) => f.mime.startsWith('image/')).map((f) => `data:${f.mime};base64,${f.data}`)];
+  const content = pics.length ? [{ type: 'text', text }, ...pics.map((url) => ({ type: 'image_url', image_url: { url } }))] : text;
   const headers = { 'content-type': 'application/json', authorization: `Bearer ${cfg.key}` };
   if (cfg.base.includes('openrouter.ai')) { headers['HTTP-Referer'] = location.origin; headers['X-Title'] = 'LUNA-X AI'; }
   const res = await fetch(`${cfg.base.replace(/\/+$/, '')}/chat/completions`, {
     method: 'POST', signal, headers,
-    body: JSON.stringify({ model: cfg.model, messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content }], max_tokens: 1500 }),
+    body: JSON.stringify({ model: cfg.model, messages: [...(system ? [{ role: 'system', content: system }] : []), ...history.map((h) => ({ role: h.role, content: h.text })), { role: 'user', content }], max_tokens: maxTokens }),
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error?.message || `HTTP ${res.status}`);
+  if (j.usage) onUsage?.({ input: j.usage.prompt_tokens || 0, output: j.usage.completion_tokens || 0, cacheRead: j.usage.prompt_tokens_details?.cached_tokens || 0 });
   return j.choices?.[0]?.message?.content || '';
 }
 
@@ -87,23 +96,28 @@ async function chromeCall({ system, text }) {
   if (!chromeSession) chromeSession = await self.LanguageModel.create({ initialPrompts: [{ role: 'system', content: system }] });
   return chromeSession.prompt(text);
 }
-async function webllmCall(cfg, { system, text, onProgress }) {
+async function webllmCall(cfg, { system, text, history = [], onProgress }) {
   if (!webllmEngine) {
     if (!navigator.gpu) throw new Error('WebLLM needs WebGPU (Chrome or Edge on a recent GPU).');
     const webllm = await import(/* @vite-ignore */ 'https://esm.run/@mlc-ai/web-llm@0.2.79');
     webllmEngine = await webllm.CreateMLCEngine(cfg.model, { initProgressCallback: (p) => onProgress?.(p.text) });
   }
-  const r = await webllmEngine.chat.completions.create({ messages: [{ role: 'system', content: system }, { role: 'user', content: text }], max_tokens: 400 });
+  const r = await webllmEngine.chat.completions.create({ messages: [{ role: 'system', content: system }, ...history.slice(-6).map((h) => ({ role: h.role, content: h.text })), { role: 'user', content: text }], max_tokens: 1200 });
   return r.choices[0].message.content;
 }
 
 export async function callProvider(settings, id, args) {
   const p = PROVIDERS[id], cfg = settings[id];
-  if (p.kind === 'gemini') return geminiCall(cfg, args);
-  if (p.kind === 'openai') return openaiCompatCall(cfg, args);
-  if (p.kind === 'chrome') return chromeCall(args);
-  if (p.kind === 'webllm') return webllmCall(cfg, args);
-  throw new Error('Claude is called through the Anthropic SDK');
+  let counted = false;
+  const a = { ...args, onUsage: (u) => { counted = true; recordUsage(id, { ...u, model: cfg.model }); } };
+  let out;
+  if (p.kind === 'gemini') out = await geminiCall(cfg, a);
+  else if (p.kind === 'openai') out = await openaiCompatCall(cfg, a);
+  else if (p.kind === 'chrome') out = await chromeCall(a);
+  else if (p.kind === 'webllm') out = await webllmCall(cfg, a);
+  else throw new Error('Claude is called through the Anthropic SDK');
+  if (!counted) recordUsage(id, { model: cfg.model }); // on-device models: count the request
+  return out;
 }
 
 export async function testProvider(settings, id, claudeTest) {

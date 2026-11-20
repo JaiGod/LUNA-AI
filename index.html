@@ -89,6 +89,19 @@ main{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:14px;
 .m .rate{display:flex;gap:6px;margin-top:6px}
 .m .rate button{border:1px solid var(--line2);background:none;border-radius:8px;padding:1px 7px;font-size:12px;color:var(--mut)}
 .m .rate button.on{border-color:var(--ok);color:var(--ok)}
+.attachlist{display:flex;gap:6px;flex-wrap:wrap;padding:0 14px}.attachlist:empty{display:none}
+.att{display:inline-flex;align-items:center;gap:6px;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:3px 6px 3px 3px;background:rgba(255,255,255,.04)}.att img{width:28px;height:28px;object-fit:cover;border-radius:5px}.att .ext{width:28px;height:28px;display:grid;place-items:center;border-radius:5px;background:rgba(56,189,248,.15);font:700 9px monospace}.att button{background:none;border:0;color:var(--mut);cursor:pointer}
+.m .body pre{background:#050b18;border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow-x:auto;font:12.5px/1.5 'JetBrains Mono',monospace;white-space:pre;margin:6px 0}
+.m .body code{font:12.5px 'JetBrains Mono',monospace;background:rgba(255,255,255,.06);border-radius:4px;padding:1px 4px}.m .body pre code{background:none;padding:0}
+.m .body h3,.m .body h4{margin:8px 0 4px;font-size:14px}.m .body ul,.m .body ol{margin:4px 0;padding-left:20px}.m .body p{margin:4px 0}.m .body a{color:var(--cyan)}
+.m .body table{border-collapse:collapse;margin:6px 0;font-size:12.5px;display:block;overflow-x:auto}.m .body th,.m .body td{border:1px solid var(--line);padding:3px 8px;text-align:left}
+.m .body .copy{float:right;font-size:10.5px;background:none;border:1px solid var(--line);border-radius:5px;color:var(--mut);cursor:pointer;margin:-2px 0 0 6px}
+.sources{margin-top:6px;font-size:11.5px;color:var(--mut);display:flex;flex-wrap:wrap;gap:4px 10px}.sources a{color:var(--cyan);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip.web{border-color:rgba(79,140,255,.6);color:#bfdbfe}.chip.code{border-color:rgba(52,211,153,.6);color:#a7f3d0}
+.m .attnote{font-size:11.5px;color:var(--mut);margin-top:3px}
+.agent{border:1px solid var(--line);border-radius:12px;padding:10px;cursor:pointer;background:rgba(255,255,255,.02)}.agent.act{border-color:var(--cyan);background:rgba(56,189,248,.08)}.agent b{display:block;font-size:13.5px}.agent span{font-size:12px;color:var(--mut)}
+.mem{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line)}.mem span{flex:1}.mem small{color:var(--dim)}.mem button{background:none;border:0;color:var(--mut);cursor:pointer}
+.usage{border-collapse:collapse;width:100%;font-size:12px;min-width:520px}.usage th,.usage td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:right;white-space:nowrap}.usage th:first-child,.usage td:first-child{text-align:left}.usage th{color:var(--mut);font-weight:600}.usage .free{color:var(--ok)}
 .thinking{font-size:12px;color:var(--mut);font-style:italic}
 .quick{display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px;border-top:1px solid var(--line2)}
 .quick button{border:1px solid var(--line2);background:rgba(255,255,255,.03);border-radius:999px;padding:4px 10px;font-size:12px;color:var(--mut)}
@@ -187,6 +200,7 @@ footer{text-align:center;color:var(--dim);font-size:12px;padding:6px 16px 28px}
     <span class="pill" id="pClaude"><i></i>Claude: off</span>
     <span class="pill" id="pFree"><i></i>Free AI: 0</span>
     <span class="aibadges" id="aiBadges" aria-label="Connected AI systems"></span>
+    <span class="pill" id="pUsage" title="AI usage today (estimated). Click for details" style="cursor:pointer"><i></i>Usage: $0 today</span>
     <span class="pill" id="pClock"><i></i>Day 37 · 07:10</span>
     <span class="pill" id="pAlerts"><i></i>No alerts</span>
     <button class="btn pri" id="btnConnect">Connect AI</button>
@@ -206,14 +220,18 @@ footer{text-align:center;color:var(--dim);font-size:12px;padding:6px 16px 28px}
     <div class="card chat">
       <div class="msgs" id="msgs" aria-live="polite"></div>
       <div class="quick" id="quick"></div>
+      <div class="attachlist" id="attachList"></div>
       <div class="composer">
         <button class="iconbtn" id="voiceBtn" title="LUNA speaks her replies (click to mute; click while she talks to stop)" aria-label="Voice on" aria-pressed="true">🔊</button>
+        <button class="iconbtn" id="attach" title="Attach images, PDFs or text/code files (or paste an image)" aria-label="Attach files">📎</button>
+        <input type="file" id="fileIn" multiple hidden accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,.txt,.md,.csv,.json,.js,.mjs,.ts,.py,.html,.css,.java,.c,.h,.cpp,.cs,.go,.rs,.rb,.php,.sql,.xml,.yaml,.yml,.log,.lua,.swift,.kt">
         <button class="iconbtn" id="mic" title="Talk to LUNA (or say “Hey Luna”)" aria-label="Talk">🎙</button>
         <textarea id="input" rows="1" placeholder="Ask LUNA-X… (Enter to send, Shift+Enter for a new line)"></textarea>
         <button class="btn pri" id="send">Send</button>
       </div>
       <div class="row" style="padding:0 14px 10px;font-size:12px;color:var(--mut)">
         <span class="seg" id="control" role="radiogroup" aria-label="Who is in control"><span class="seglbl">In control:</span><button data-c="team" role="radio">LUNA-X + Claude</button><button data-c="claude" role="radio">Claude takes over</button><button data-c="luna" role="radio">LUNA solo</button></span>
+        <label>Agent <select id="agentSel" class="inp" style="width:auto;padding:3px 6px"></select></label>
         <label><input type="checkbox" id="speak" checked> Speak replies</label>
         <label>Voice <select id="voicePick" class="inp" style="width:auto;max-width:170px;padding:3px 6px"><option value="">Auto (LUNA)</option></select></label>
         <label>Speed <input type="range" id="voiceRate" min="0.7" max="1.5" step="0.05" value="1" style="width:70px;vertical-align:middle"></label>
@@ -235,6 +253,7 @@ footer{text-align:center;color:var(--dim);font-size:12px;padding:6px 16px 28px}
       <button data-t="wellness">Wellness Dock</button>
       <button data-t="training">Training</button>
       <button data-t="lash">LASH-Net</button>
+      <button data-t="workspace">Workspace</button>
       <button data-t="network">AI Network</button>
     </nav>
 
@@ -344,11 +363,27 @@ footer{text-align:center;color:var(--dim);font-size:12px;padding:6px 16px 28px}
       <div class="sec"><span class="k">Responses</span><div id="netLog" class="mono" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div></div>
     </div>
 
+    <div class="pane" id="t-workspace">
+      <h3>Workspace · agents, memory, projects</h3>
+      <p class="sub">LUNA-X is the operating system; Claude, Gemini, Llama and OpenAI are the engines. Pick a specialist agent, see what LUNA remembers about you, and keep project notes LUNA can continue from. Everything here stays in this browser.</p>
+      <div class="sec"><span class="k">Luna agents</span><div class="grid g2" id="agents" style="margin-top:6px"></div></div>
+      <div class="sec"><span class="k">Routing</span><label style="font-size:13px;display:block;margin-top:6px"><input type="checkbox" id="autoRoute"> Auto-route tasks to the best connected AI (Claude for code, files and habitat tools; Gemini for quick web research; OpenAI for creative writing). Each reply still shows which AI answered.</label></div>
+      <div class="sec"><span class="k">Long-term memory</span><label style="font-size:13px;display:block;margin:6px 0"><input type="checkbox" id="memOn"> Memory on</label><div id="memList"></div><div class="row" style="margin-top:6px"><input class="inp" id="memNew" placeholder="Add something LUNA should remember" style="flex:1"><button class="btn sm" id="memAdd">Remember</button></div></div>
+      <div class="sec"><span class="k">Projects</span><div class="row" style="margin-top:6px"><select class="inp" id="projSel" style="flex:1"></select><button class="btn sm" id="projNew">New project</button></div>
+        <label class="sub" style="display:block;margin-top:8px">Project notes (LUNA reads these)</label><textarea class="inp" id="projNotes" rows="5" style="width:100%;resize:vertical"></textarea>
+        <div id="projLog" class="mono" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div>
+        <div class="row" style="margin-top:6px"><button class="btn sm" id="projContinue">Continue this project</button><button class="btn sm" id="projReport">Research report (Researcher)</button></div></div>
+    </div>
+
     <div class="pane" id="t-network">
       <h3>AI Network · LUNA-X orchestrator</h3>
       <p class="sub">LUNA-X is not one AI. It routes each task to the best connected model and fuses their answers. Keys stay in this browser (optional “remember”) and go only to that provider. Free options are marked FREE.</p>
       <div class="note" style="margin-bottom:10px">Routing: Claude runs LUNA's reasoning, tools, safety checks and SELENE deep scans. Gemini, OpenAI and Llama independently verify each detection, and LUNA-X fuses the votes. With no Claude key, LUNA answers commands offline and uses any connected free AI for conversation.</div>
       <div id="provs"></div>
+      <div class="sec"><span class="k">Usage · how much each AI has used</span>
+        <p class="sub" style="margin:6px 0">Counted in this browser from every reply (LUNA-X and SELENE). Costs are estimates from list prices; free tiers cost nothing within their limits. For official numbers and remaining credit, open each provider's dashboard.</p>
+        <div style="overflow-x:auto"><table class="usage" id="usageTable"></table></div>
+        <div class="row" style="margin-top:6px"><span class="sub" id="usageSince" style="margin:0"></span><button class="btn sm" id="usageReset" style="margin-left:auto">Reset meter</button></div></div>
       <div class="sec"><span class="k">Live AI collaboration stream</span><div id="collab" class="mono" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div></div>
     </div>
   </section>
